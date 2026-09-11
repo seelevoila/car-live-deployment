@@ -1,0 +1,38 @@
+# Local environments and model runtimes
+.venv/
+**/.venv/
+GPT-SoVITS/
+test/
+
+# Local state, uploads, caches and review intermediates
+backend/.env
+data/car_live.db
+data/uploads/
+models/rag/
+data/*.rag-index/
+artifacts/astra-v1-base/
+artifacts/AstraTTS-source/
+_docx_review/
+.pytest_cache/
+**/__pycache__/
+*.py[cod]
+
+# Runtime logs and generated audio/diagnostic captures
+*.log
+*.wav
+!data/preset_voices/*.wav
+*.bin
+*.TAG
+backend/*.json
+backend/*.wav
+*.payload.json
+backendtts
+/payload.json
+/test-payload.json
+/tts_diag_payload.json
+/tts_payload.json
+/verify_payload.json
+
+# Temporary editor/system files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,443 @@
+[
+  {
+    "question": "这款车的轴距是多少毫米？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "2720"
+    ],
+    "evidence": "轴距(mm)是：2720"
+  },
+  {
+    "question": "这辆车充满电，按CLTC标准可以跑多少公里？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "580"
+    ],
+    "evidence": "CLTC纯电续航里程(km)是：580"
+  },
+  {
+    "question": "这款车的最大功率是多少千瓦？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "150"
+    ],
+    "evidence": "最大功率(kW)是：150"
+  },
+  {
+    "question": "它的电池容量有多少度电？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "58.3"
+    ],
+    "evidence": "电池能量(kWh)是：58.3"
+  },
+  {
+    "question": "后备厢容积有多少升？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "377"
+    ],
+    "evidence": "后备厢容积(L)是：377"
+  },
+  {
+    "question": "露营时对外交流放电功率是多少千瓦？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "6"
+    ],
+    "evidence": "对外交流放电功率(kW)是：6"
+  },
+  {
+    "question": "这辆车快充需要多长时间？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "0.33"
+    ],
+    "evidence": "电池快充时间(小时)是：0.33"
+  },
+  {
+    "question": "激光雷达版的厂商指导价是多少钱？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "13.38"
+    ],
+    "evidence": "厂商指导价(元)是：13.38万"
+  },
+  {
+    "question": "它最高能开到多少公里每小时？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "170"
+    ],
+    "evidence": "最高车速(km/h)是：170"
+  },
+  {
+    "question": "电动机总马力是多少匹？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "204"
+    ],
+    "evidence": "电动机总马力(Ps)是：204"
+  },
+  {
+    "question": "这款车的整备质量是多少公斤？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "1655"
+    ],
+    "evidence": "整备质量(kg)是：1655"
+  },
+  {
+    "question": "车辆最大满载质量是多少公斤？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "2055"
+    ],
+    "evidence": "最大满载质量(kg)是：2055"
+  },
+  {
+    "question": "车身长度是多少毫米？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "4471"
+    ],
+    "evidence": "长度(mm)是：4471"
+  },
+  {
+    "question": "车身宽度是多少毫米？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "1844"
+    ],
+    "evidence": "宽度(mm)是：1844"
+  },
+  {
+    "question": "车身高度是多少毫米？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "1641"
+    ],
+    "evidence": "高度(mm)是：1641"
+  },
+  {
+    "question": "前轮距是多少毫米？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "1583"
+    ],
+    "evidence": "前轮距(mm)是：1583"
+  },
+  {
+    "question": "后轮距是多少毫米？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "1577"
+    ],
+    "evidence": "后轮距(mm)是：1577"
+  },
+  {
+    "question": "使用慢充充满需要多少小时？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "10.5"
+    ],
+    "evidence": "电池慢充时间(小时)是：10.5"
+  },
+  {
+    "question": "资料中的快充时间是从百分之多少充到多少？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "30-80"
+    ],
+    "evidence": "电池快充电量范围(%)是：30-80"
+  },
+  {
+    "question": "电能当量燃料消耗量是多少？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "1.35"
+    ],
+    "evidence": "电能当量燃料消耗量(L/100km)是：1.35"
+  },
+  {
+    "question": "前电动机用的是什么型号？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "QT36TZ220001"
+    ],
+    "evidence": "前电动机型号是：QT36TZ220001"
+  },
+  {
+    "question": "前电动机由哪个品牌生产？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "蜂巢传动"
+    ],
+    "evidence": "前电动机品牌是：蜂巢传动"
+  },
+  {
+    "question": "慢充充电口在车身什么位置？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "右前侧"
+    ],
+    "evidence": "慢充接口位置是：车右前侧"
+  },
+  {
+    "question": "驱动电机布局在前面还是后面？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "前置"
+    ],
+    "evidence": "电机布局是：前置"
+  },
+  {
+    "question": "电池采用什么冷却方式？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "液冷"
+    ],
+    "evidence": "电池冷却方式是：液冷"
+  },
+  {
+    "question": "这款车能不能快充？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "支持"
+    ],
+    "evidence": "快充功能是：支持"
+  },
+  {
+    "question": "车门是以什么方式开启的？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "平开门"
+    ],
+    "evidence": "车门开启方式是：平开门"
+  },
+  {
+    "question": "车上有没有电池预加热功能？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "标配"
+    ],
+    "evidence": "电池预加热是：标配"
+  },
+  {
+    "question": "辅助泊车入位是不是标配？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "标配"
+    ],
+    "evidence": "辅助泊车入位是：标配"
+  },
+  {
+    "question": "前排和后排的侧气囊分别是什么配置？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "前标配",
+      "后-"
+    ],
+    "evidence": "前/后排侧气囊是：前标配/后-"
+  },
+  {
+    "question": "这款车配备车道偏离预警系统吗？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "标配"
+    ],
+    "evidence": "车道偏离预警系统是：标配"
+  },
+  {
+    "question": "卫星导航系统是不是标配？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "标配"
+    ],
+    "evidence": "卫星导航系统是：标配"
+  },
+  {
+    "question": "车辆支持OTA升级吗？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "标配"
+    ],
+    "evidence": "OTA升级是：标配"
+  },
+  {
+    "question": "车上有Wi-Fi热点功能吗？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "标配"
+    ],
+    "evidence": "Wi-Fi热点是：标配"
+  },
+  {
+    "question": "仪表盘是不是全液晶的？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "标配"
+    ],
+    "evidence": "全液晶仪表盘是：标配"
+  },
+  {
+    "question": "方向盘是不是多功能方向盘？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "标配"
+    ],
+    "evidence": "多功能方向盘是：标配"
+  },
+  {
+    "question": "蓝牙车载电话有没有配备？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "标配"
+    ],
+    "evidence": "蓝牙/车载电话是：标配"
+  },
+  {
+    "question": "有没有能量回收系统？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "标配"
+    ],
+    "evidence": "能量回收系统是：标配"
+  },
+  {
+    "question": "语音能连续识别吗？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "标配"
+    ],
+    "evidence": "语音连续识别是：标配"
+  },
+  {
+    "question": "辅助驾驶灯是否标配？",
+    "brand": "欧拉",
+    "series": "欧拉5 EV",
+    "year": "2026",
+    "top_k": 5,
+    "expected": [
+      "标配"
+    ],
+    "evidence": "辅助驾驶灯是：标配"
+  }
+]

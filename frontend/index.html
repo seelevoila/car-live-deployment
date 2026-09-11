@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="基于大模型与 RAG 的汽车直播智能体：知识库检索、流式 TTS 动态播报与拟人化语音克隆。">
+  <title>汽车直播智能体 · 直播播控台</title>
+  <link rel="stylesheet" href="style.css?v=20260911-v3">
+</head>
+<body>
+  <header>
+    <div class="topbar">
+      <div class="logo">CL</div>
+      <div class="brand"><b>汽车直播智能体</b><small>大模型 + RAG + 流式 TTS</small></div>
+      <span id="status">连接中…</span>
+    </div>
+    <nav>
+      <div class="nav-group">
+        <span class="nav-label">核心模块</span>
+        <button data-view="knowledge"><i>01</i>知识库</button>
+        <button data-view="studio"><i>02</i>直播台</button>
+        <button data-view="voices"><i>03</i>音色克隆</button>
+      </div>
+      <div class="nav-group">
+        <span class="nav-label">扩展能力</span>
+        <button data-view="avatar">数字主播</button>
+        <button data-view="analytics">直播统计</button>
+        <button data-view="tests">效果验证</button>
+        <button data-view="evaluation">音色听测</button>
+        <button data-view="model">模型接口</button>
+      </div>
+    </nav>
+  </header>
+  <main id="app"></main>
+  <script src="vendor/pixi.min.js"></script>
+  <script src="vendor/live2dcubismcore.min.js"></script>
+  <script src="vendor/cubism4.min.js"></script>
+  <script src="lip-sync.js?v=20260910-ui"></script>
+  <script src="avatar-performer.js?v=20260910-ui"></script>
+  <script src="voice-recorder.js?v=20260910-ui"></script>
+  <script src="voice-library.js?v=20260910-ui"></script>
+  <script src="app-fixes.js?v=20260910-fixes"></script>
+  <script src="app.js?v=20260910-ui"></script>
+  <script src="features.js?v=20260910-ui"></script>
+</body>
+</html>

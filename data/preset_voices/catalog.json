@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "voices": [
+    {
+      "id": "steady",
+      "name": "沉稳阿川",
+      "gender": "男声",
+      "tag": "沉稳讲解",
+      "description": "适合车型配置与购车建议。",
+      "prompt_text": "今天要干什么？有钱我就干，没钱…也行，只要你开口，伙计。",
+      "prompt_lang": "zh",
+      "model_profile": "base",
+      "assets": [
+        {
+          "file": "steady-0.wav",
+          "sha256": "18a6e1f61a887bd714662f194a90162f5ab769b0c74d7e6372031c26a62a7f49",
+          "duration_seconds": 6.02
+        },
+        {
+          "file": "steady-1.wav",
+          "sha256": "dd5fcb150e869292c1356f04e904f6e3d92669ef338426c12d7cd9220241a922",
+          "duration_seconds": 8.505
+        }
+      ],
+      "sampling": {
+        "seed": 133112552,
+        "top_k": 20,
+        "top_p": 0.72,
+        "temperature": 0.66,
+        "repetition_penalty": 1.35
+      },
+      "source": {
+        "type": "existing-project-sample",
+        "original_name": "桑博",
+        "original_voice_id": "voice-9b8ba1bffad5"
+      }
+    },
+    {
+      "id": "energetic",
+      "name": "活力小桃",
+      "gender": "女声",
+      "tag": "活力介绍",
+      "description": "适合新车亮点与直播开场。",
+      "prompt_text": "没想到没想到，胡桃我现在力如泉，心似雄鹰，非常有自信哦。",
+      "prompt_lang": "zh",
+      "model_profile": "base",
+      "assets": [
+        {
+          "file": "energetic-0.wav",
+          "sha256": "f342085ab916bce4568162495996c51335c27d1b0213c5bea393a39bf5708d41",
+          "duration_seconds": 6.365
+        },
+        {
+          "file": "energetic-1.wav",
+          "sha256": "0d1e70360dd86e306d5728516766ad0fcae2f7e928a01c9b9838e2c9648b5996",
+          "duration_seconds": 7.405
+        }
+      ],
+      "sampling": {
+        "seed": 29782042,
+        "top_k": 20,
+        "top_p": 0.72,
+        "temperature": 0.66,
+        "repetition_penalty": 1.35
+      },
+      "source": {
+        "type": "existing-project-sample",
+        "original_name": "胡桃",
+        "original_voice_id": "voice-ff9f6ad7787d"
+      }
+    },
+    {
+      "id": "friendly",
+      "name": "亲切阿诚",
+      "gender": "男声",
+      "tag": "亲切交流",
+      "description": "适合日常讲解与观众问答。",
+      "prompt_text": "正是像停云小姐这样的接渡使往来周旋，仙舟的贸易才能有如今的繁盛。",
+      "prompt_lang": "zh",
+      "model_profile": "base",
+      "assets": [
+        {
+          "file": "friendly-0.wav",
+          "sha256": "9710a0b318493e6eb7ccb190c5ca2e8f77dd98e34d979552a5306ed725fb0ef0",
+          "duration_seconds": 6.306
+        },
+        {
+          "file": "friendly-1.wav",
+          "sha256": "2d0d838522882a73b8b6b4dd8bc99186f2d93003fd3d4040328a9db2412b58c7",
+          "duration_seconds": 6.782
+        }
+      ],
+      "sampling": {
+        "seed": 964483923,
+        "top_k": 15,
+        "top_p": 0.65,
+        "temperature": 0.6,
+        "repetition_penalty": 1.35
+      },
+      "source": {
+        "type": "existing-project-sample",
+        "original_name": "我的主播",
+        "original_voice_id": "voice-8467c334ed5b"
+      }
+    }
+  ]
+}
