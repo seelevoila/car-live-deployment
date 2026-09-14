@@ -16,11 +16,33 @@ MODELS = {
 }
 
 
+def materialize_bundled_parts(directory: Path):
+    """Join repository-hosted model parts before attempting a network download."""
+    for role in MODELS:
+        folder = directory / role
+        target = folder / 'model_quantized.onnx'
+        parts = sorted(folder.glob('model_quantized.onnx.part-*'))
+        if target.is_file() or not parts:
+            continue
+        temporary = target.with_name(target.name + '.assembling')
+        with temporary.open('wb') as output:
+            for part in parts:
+                with part.open('rb') as source:
+                    while True:
+                        block = source.read(1024 * 1024)
+                        if not block:
+                            break
+                        output.write(block)
+        temporary.replace(target)
+        print(f'{role}/{target.name}: assembled from {len(parts)} repository parts', flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--endpoint', default='https://huggingface.co')
     parser.add_argument('--directory', type=Path, default=Path(__file__).resolve().parents[1] / 'models' / 'rag')
     args = parser.parse_args()
+    materialize_bundled_parts(args.directory)
     with httpx.Client(timeout=httpx.Timeout(60, connect=20), follow_redirects=True, trust_env=False) as client:
         for role, (repo, revision) in MODELS.items():
             folder = args.directory / role

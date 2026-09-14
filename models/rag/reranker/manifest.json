@@ -1,0 +1,22 @@
+{
+  "repository": "Xenova/bge-reranker-base",
+  "revision": "280bcc27a84e0b898c251e06fddb25171bd9b101",
+  "files": {
+    "config.json": {
+      "sha256": "b6575b9d5be20d6747417c8e20c5a0db1636356e0b6d422d7244c628423c4d4c",
+      "lfs_verified": false
+    },
+    "tokenizer.json": {
+      "sha256": "48564c5c7d3fa64d85d95e65414a542385f88b0f128fd8d4163fd7a57f2be05c",
+      "lfs_verified": true
+    },
+    "tokenizer_config.json": {
+      "sha256": "a1d6bc8734a6f635dc158508bef000f8e2e5a759c7d92f984b2c86e5ff53425b",
+      "lfs_verified": false
+    },
+    "model_quantized.onnx": {
+      "sha256": "dd98f3e67837d23210a6b7550c08cced4f61845b940ac45be3565840a10f3244",
+      "lfs_verified": true
+    }
+  }
+}

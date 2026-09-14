@@ -8,7 +8,9 @@ test/
 backend/.env
 data/car_live.db
 data/uploads/
-models/rag/
+# RAG model files are committed below. The large reranker ONNX is stored as
+# repository parts and joined by scripts/setup_rag_models.py after clone.
+models/rag/reranker/model_quantized.onnx
 data/*.rag-index/
 artifacts/astra-v1-base/
 artifacts/AstraTTS-source/

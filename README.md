@@ -6,6 +6,8 @@
 
 要求：Windows 10/11、Python 3.10+，建议 8 GB 以上内存和 10 GB 可用磁盘空间。
 
+仓库已包含当前使用的 Embedding 和 Reranker，以及配套分词器和配置，共约 306 MiB。Reranker 按 GitHub 文件限制拆成三个仓库分片，首次运行脚本会自动合并并校验。模型版本和校验信息见 [models/rag/README.md](models/rag/README.md)。
+
 ```powershell
 git clone https://github.com/seelevoila/car-live-deployment.git
 cd car-live-deployment
@@ -42,4 +44,4 @@ powershell -ExecutionPolicy Bypass -File .\install-startup.ps1
 powershell -ExecutionPolicy Bypass -File .\install-startup.ps1 -Remove
 ```
 
-运行数据、上传文件、数据库、模型缓存、日志和本地模型源码均不会提交到仓库。
+RAG 模型随仓库通过 Git LFS 提供。运行数据、上传文件、数据库、日志、TTS 模型及其源码不包含在仓库中。
