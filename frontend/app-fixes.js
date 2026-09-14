@@ -40,6 +40,7 @@
 
   window.setTimeout = function(handler, timeout, ...args) {
     const wrappedHandler = function() {
+      window._activeTimers.delete(id);
       try {
         if (typeof handler === 'function') {
           handler.apply(this, args);

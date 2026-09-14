@@ -2,6 +2,11 @@ let voiceRecorder = null;
 const API = 'http://127.0.0.1:8000/api';
 const app = document.querySelector('#app');
 let session = null;
+let sessionRequest = null;
+let currentView = '';
+let playPending = 0;
+let revisionPending = false;
+let questionRequest = null;
 
 // Track active view loading to prevent race conditions
 let activeViewLoading = null;
@@ -105,6 +110,10 @@ const api = async (path, options = {}) => {
     }
     throw new Error(detail);
   }
+  if (options.method && options.method !== 'GET' && /^\/(documents|knowledge|voices)(\/|$)/.test(path)) {
+    apiCache.data.clear();
+    apiCache.timestamps.clear();
+  }
   const type = response.headers.get('content-type') || '';
   return type.includes('application/json') ? response.json() : response;
 };
@@ -122,7 +131,7 @@ function showViewError(error) {
       retryBtn.addEventListener('click', () => {
         const active = document.querySelector('nav button.active') || document.querySelector('nav button');
         const view = active?.dataset.view || 'knowledge';
-        viewLoaders()[view]?.().catch(showViewError);
+        void renderView(view);
       });
     }
   } catch (err) {
@@ -141,14 +150,15 @@ async function loadActiveView() {
   if (healthReloadInFlight) return;
   const active = document.querySelector('nav button.active') || document.querySelector('nav button');
   const view = active?.dataset.view || 'knowledge';
-  const loader = viewLoaders()[view];
-  if (!loader) return;
   healthReloadInFlight = true;
-  try { await loader(); } catch (error) { showViewError(error); }
+  try { await renderView(view); }
   finally { healthReloadInFlight = false; }
 }
 
+let healthChecking = false;
 async function pollHealth() {
+  if (healthChecking) return;
+  healthChecking = true;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 3000);
   try {
@@ -159,25 +169,24 @@ async function pollHealth() {
     const recovered = serviceOnline === false;
     serviceOnline = true;
     setServiceStatus(true);
-    console.log('✅ Health check passed - service online');
     // A first load can happen before the backend has finished starting. Once
     // it recovers, replace the error view automatically without a manual click.
-    if (recovered && app && app.isConnected && app.querySelector('.notice.error')) {
+    if (recovered && app && app.isConnected && app.querySelector('#retryView')) {
       await loadActiveView();
     }
   } catch (error) {
-    console.log('❌ Health check failed:', error.message);
     serviceOnline = false;
     setServiceStatus(false);
   } finally {
     clearTimeout(timeout);
+    healthChecking = false;
   }
 }
 
 function startHealthMonitor() {
   if (healthTimer) return;
   pollHealth();
-  healthTimer = setInterval(pollHealth, 2500);
+  healthTimer = setInterval(pollHealth, 5000);
 }
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -286,6 +295,7 @@ const setState = (text, unit = '') => {
     if (node && node.isConnected) node.textContent = text;
     const detail = document.querySelector('#playunit');
     if (detail && detail.isConnected) detail.textContent = unit ? `当前短语：${unit}` : '';
+    updatePlaybackControls();
   } catch (err) {
     console.warn('⚠️ setState failed:', err.message);
   }
@@ -300,6 +310,8 @@ function renderScriptUnits() {
     node.innerHTML = units.length
       ? `播报切分：${units.map((unit, index) => `<span>${index + 1}. ${esc(unit)}</span>`).join('')}`
       : '播报切分：暂无内容';
+    saveStudioDraft();
+    updatePlaybackControls();
   } catch (err) {
     console.warn('⚠️ renderScriptUnits failed:', err.message);
   }
@@ -406,16 +418,108 @@ function viewLoaders() {
   return { knowledge, studio, voices, avatar, tests, ...window.CarLiveViews };
 }
 
-function stopCurrentView() {
-  voiceRecorder?.dispose(); voiceRecorder = null;
-  stopLive({suspend:true});
-  speechSynthesis.cancel();
-  cleanupLive2D();
-  // Clear any pending timers to prevent null errors after view change
-  if (healthTimer) {
-    clearInterval(healthTimer);
-    healthTimer = null;
+function beginViewLoad(view) {
+  if (currentView && currentView !== view) return null;
+  return activeViewLoading = Symbol(view);
+}
+
+async function renderView(view) {
+  const loader = viewLoaders()[view];
+  if (typeof loader !== 'function' || currentView !== view) return;
+  const task = loader();
+  const loadingId = activeViewLoading;
+  try { await task; }
+  catch (error) {
+    if (currentView === view && activeViewLoading === loadingId) showViewError(error);
   }
+}
+
+const DRAFT_FIELDS = ['script', 'question', 'vehicle', 'speed', 'volume', 'pitch'];
+function saveStudioDraft() {
+  if (!document.querySelector('#script')) return;
+  const draft = {};
+  for (const id of DRAFT_FIELDS) {
+    const node = document.querySelector('#' + id);
+    if (node) draft[id] = node.value;
+  }
+  try { sessionStorage.setItem('carLiveStudioDraft', JSON.stringify(draft)); } catch {}
+}
+
+function initializeStudioDraft() {
+  const units = document.querySelector('#scriptUnits');
+  if (units && !units.closest('details')) {
+    const details = document.createElement('details');
+    details.className = 'script-breakdown';
+    const summary = document.createElement('summary');
+    summary.textContent = '播报分句';
+    details.append(summary);
+    units.parentElement.append(details);
+    details.append(units);
+  }
+  let draft = {};
+  try { draft = JSON.parse(sessionStorage.getItem('carLiveStudioDraft') || '{}') || {}; } catch {}
+  for (const id of DRAFT_FIELDS) {
+    const node = document.querySelector('#' + id);
+    if (!node) continue;
+    if (typeof draft[id] === 'string' && (id !== 'vehicle' || [...node.options].some(option => option.value === draft[id]))) {
+      node.value = draft[id];
+    }
+    node.addEventListener('input', saveStudioDraft);
+  }
+  document.querySelector('#vehicle')?.addEventListener('change', () => {
+    stop();
+    session = null;
+    sessionRequest = null;
+    clearAnswer();
+    saveStudioDraft();
+  });
+  document.querySelector('#question')?.addEventListener('input', clearAnswer);
+  const stateNode = document.querySelector('#playstate');
+  stateNode?.setAttribute('role', 'status');
+  stateNode?.setAttribute('aria-live', 'polite');
+  document.querySelector('#script')?.setAttribute('aria-label', '直播脚本');
+  document.querySelector('#question')?.setAttribute('aria-label', '观众问题');
+  clearAnswer();
+  safeSet('#speakAnswer', 'textContent', '播报回答');
+  updateOutputs();
+  renderScriptUnits();
+}
+
+function updatePlaybackControls() {
+  const busy = Boolean(playPending);
+  const running = Boolean(liveRun && !liveRun.stopped && !liveRun.failed);
+  const hasScript = Boolean(document.querySelector('#script')?.value.trim());
+  safeSet('#play', 'disabled', busy || !hasScript || (running && !liveRun.paused));
+  safeSet('#play', 'textContent', busy ? '准备中…' : running && liveRun.paused ? '继续播报' : '开始播报');
+  safeSet('#pause', 'disabled', !running || liveRun.paused);
+  safeSet('#stop', 'disabled', !liveRun && !busy);
+  safeSet('#stopPreview', 'disabled', !liveRun && !busy);
+  safeSet('#revise', 'disabled', busy || Boolean(revisionPending) || !hasScript);
+  safeSet('#speakAnswer', 'disabled', !currentAnswer || Boolean(questionRequest) || busy);
+  safeSet('#previewVoice', 'disabled', busy);
+}
+
+function clearAnswer() {
+  questionRequest?.abort();
+  questionRequest = null;
+  currentAnswer = '';
+  safeSet('#answer', 'innerHTML', '');
+  safeSet('#ask', 'disabled', false);
+  safeSet('#ask', 'textContent', '检索回答');
+  updatePlaybackControls();
+}
+
+function stopCurrentView() {
+  saveStudioDraft();
+  activeViewLoading = null;
+  clearAnswer();
+  voiceRecorder?.dispose(); voiceRecorder = null;
+  stop();
+  session = null;
+  sessionRequest = null;
+  revisionPending = false;
+  cleanupLive2D();
+  document.querySelector('#generateScriptDialog')?.remove();
 }
 
 function cleanupLive2D() {
@@ -516,7 +620,10 @@ async function loadLive2DModel(modelUrl) {
 }
 
 async function knowledge() {
+  const loadingId = beginViewLoad('knowledge');
+  if (!loadingId) return;
   const [docs, dash] = await Promise.all([api('/documents'), api('/dashboard')]);
+  if (activeViewLoading !== loadingId) return;
   layout('知识库管理', '批量导入 PDF / Word / TXT 车型资料，自动清洗、分段、向量化入库；检索结果可溯源到文档与版本。', `
     <div class="metrics"><div class="metric"><b>${dash.documents}</b><span>资料文件</span></div><div class="metric"><b>${dash.chunks}</b><span>知识片段</span></div><div class="metric"><b>${dash.versions}</b><span>资料版本</span></div><div class="metric"><b>${dash.vehicles.length}</b><span>车型</span></div></div>
     <section class="panel"><div class="panel-head"><h2>导入资料</h2><span>PDF / Word / TXT</span></div><div class="panel-body upload"><label class="drop">选择资料文件<input id="files" type="file" accept=".pdf,.docx,.txt" multiple hidden></label><div class="fields"><label>品牌<input id="brand" placeholder="欧拉"></label><label>车系<input id="series" placeholder="欧拉5 EV"></label><label>年款<input id="year" placeholder="2026"></label><button class="btn" id="upload">导入并入库</button></div><p class="hint">支持批量上传，自动脱敏手机号、身份证号和邮箱地址</p></div></section>
@@ -659,8 +766,9 @@ function initializeVoicePicker(voices) {
   if (select) {
     select.value = VoiceLibrary.preferred(voices, storedVoiceId());
     select.onchange = () => {
-      stopLive();
-      speechSynthesis.cancel();
+      stop();
+      session = null;
+      sessionRequest = null;
       rememberVoiceId(select.value);
       refresh();
       primeSelectedVoice();
@@ -674,6 +782,7 @@ function initializeVoicePicker(voices) {
         select.value = button.dataset.id;
         select.onchange();
       } else {
+        stop();
         refresh();
       }
       const voice = voices.find(item => item.id === currentId());
@@ -684,9 +793,8 @@ function initializeVoicePicker(voices) {
 }
 
 async function studio() {
-  // Generate unique loading ID
-  const loadingId = Symbol('studio');
-  activeViewLoading = loadingId;
+  const loadingId = beginViewLoad('studio');
+  if (!loadingId) return;
 
   // 显示加载状态
   if (app && app.isConnected) {
@@ -700,7 +808,7 @@ async function studio() {
     const [dash, voices, tts] = await Promise.all([
       cachedApi('/dashboard'),
       cachedApi('/voices'),
-      cachedApi('/tts/status')
+      api('/tts/status')
     ]);
 
     // Check if this view is still active
@@ -713,8 +821,8 @@ async function studio() {
     ttsMode = tts.provider === 'browser' ? 'browser' : 'gpt-sovits';
     const first = dash.vehicles[0] || {brand:'欧拉',series:'欧拉5 EV',year:'2026'};
     layout('直播控制台', '导入或编写直播话术，边生成边播放；播报中改稿会在下一个自然停顿安全切换。', `
-    <section class="panel"><div class="panel-body fields studio-settings"><label>车型<select id="vehicle">${vehicleOptions(dash.vehicles)}</select></label><label>音色<select id="voice">${VoiceLibrary.options(voices, esc)}</select></label><label>语速 <output id="speedOut">1.00</output><input id="speed" type="range" min="0.7" max="1.4" value="1.00" step="0.01"></label><label>音量 <output id="volumeOut">100%</output><input id="volume" type="range" min="0" max="1" value="1" step="0.05"></label><label>语调 <output id="pitchOut">0</output><input id="pitch" type="range" min="-4" max="4" value="0" step="1"></label><span id="ttsMode">检查语音引擎…</span></div></section>
-    <section class="panel"><div class="panel-head"><h2>音色试听</h2><span id="selectedVoiceName"></span></div><div class="panel-body"><textarea id="voicePreviewText" class="question" aria-label="试听文案">大家好，欢迎来到汽车直播间，今天给大家介绍这款车型。</textarea><div class="controls"><button class="btn" id="previewVoice">试听</button><button class="btn secondary" id="stopPreview">停止</button></div></div></section>
+    <section class="panel live-settings-panel"><div class="panel-body fields studio-settings"><label>车型<select id="vehicle">${vehicleOptions(dash.vehicles)}</select></label><label>音色<select id="voice">${VoiceLibrary.options(voices, esc)}</select></label><label>语速 <output id="speedOut">1.00</output><input id="speed" type="range" min="0.7" max="1.4" value="1.00" step="0.01"></label><label>音量 <output id="volumeOut">100%</output><input id="volume" type="range" min="0" max="1" value="1" step="0.05"></label><label>语调 <output id="pitchOut">0</output><input id="pitch" type="range" min="-4" max="4" value="0" step="1"></label><span id="ttsMode">检查语音引擎…</span></div></section>
+    <details class="studio-preview"><summary>音色试听<span id="selectedVoiceName"></span></summary><div class="panel-body"><textarea id="voicePreviewText" class="question" aria-label="试听文案">大家好，欢迎来到汽车直播间，今天给大家介绍这款车型。</textarea><div class="controls"><button class="btn" id="previewVoice">试听</button><button class="btn secondary" id="stopPreview">停止</button></div></div></details>
     <div class="studio"><section class="panel"><div class="panel-head"><h2>直播脚本</h2><span id="version"></span></div><div class="panel-body"><div class="inline-tools"><label class="btn secondary file-btn">导入脚本<input id="scriptFile" type="file" accept=".txt,.md" hidden></label><button class="btn secondary" id="generate">生成脚本</button></div><textarea id="script">老板，今天为大家介绍欧拉 5 EV 2026 款 580km 激光雷达版。它的 CLTC 纯电续航为 580 公里，轴距 2720 毫米，最大功率 150 千瓦。</textarea><p id="scriptUnits" class="script-units"></p><div class="controls"><button class="btn" id="play">开始播报</button><button class="btn secondary" id="pause">暂停</button><button class="btn secondary" id="stop">停止</button><button class="btn secondary" id="revise">应用改稿</button></div><p id="playstate">当前句 0 / 0 · 待机</p><p id="playunit" class="hint"></p></div></section>
     <aside class="panel"><div class="panel-head"><h2>观众问答</h2></div><div class="panel-body"><textarea class="question" id="question">欧拉 5 EV 的续航是多少？</textarea><button class="btn" id="ask">检索回答</button><button class="btn secondary" id="speakAnswer">语音播报</button><div id="answer"></div></div></aside></div>`, {eyebrow:'核心模块 02', tag:'流式 TTS 与动态改稿'});
 
@@ -747,7 +855,6 @@ async function studio() {
         if (input) input.oninput = () => updateOutputs();
       });
       updateOutputs();
-      renderScriptUnits();
       const modeNode = $('#ttsMode');
       if (modeNode) modeNode.textContent = ttsMode === 'gpt-sovits' ? `${tts.provider_label || '服务端 TTS'} · PCM 实时流式播报` : 'Web Speech API（回退模式）';
       initializeVoicePicker(voices);
@@ -759,6 +866,7 @@ async function studio() {
       primeSelectedVoice();
       const vehicleSelect = $('#vehicle');
       if (dash.vehicles.length && vehicleSelect) vehicleSelect.value = [first.brand,first.series,first.year].join(' / ');
+      initializeStudioDraft();
     };
 
     // 优先渲染界面，然后异步初始化
@@ -775,8 +883,11 @@ async function studio() {
 }
 
 async function voices() {
+  const loadingId = beginViewLoad('voices');
+  if (!loadingId) return;
   voiceRecorder?.dispose(); voiceRecorder = null;
   const allVoices = await api('/voices');
+  if (activeViewLoading !== loadingId) return;
   layout('音色克隆', '内置多套汽车主播音色可一键切换，也可上传或现场录制一段真人样本克隆专属主播。', `
     ${VoiceLibrary.cards(allVoices, esc)}
     <section class="panel"><div class="panel-head"><h2>音色试听</h2><span id="selectedVoiceName"></span></div><div class="panel-body"><textarea id="voicePreviewText" class="question" aria-label="试听文案">大家好，欢迎来到汽车直播间，今天给大家介绍这款车型。</textarea><div class="controls"><button class="btn" id="previewVoice">试听</button><button class="btn secondary" id="stopPreview">停止</button></div><p id="playstate">空闲 · 未播报</p><p id="playunit" class="hint"></p></div></section>
@@ -840,9 +951,8 @@ async function voices() {
 }
 
 async function avatar() {
-  // Generate unique loading ID
-  const loadingId = Symbol('avatar');
-  activeViewLoading = loadingId;
+  const loadingId = beginViewLoad('avatar');
+  if (!loadingId) return;
 
   // 显示加载状态
   if (app && app.isConnected) {
@@ -854,7 +964,7 @@ async function avatar() {
     const [dash, voices, tts, avatarStatus] = await Promise.all([
       cachedApi('/dashboard'),
       cachedApi('/voices'),
-      cachedApi('/tts/status'),
+      api('/tts/status'),
       cachedApi('/live2d/status'),
     ]);
 
@@ -919,8 +1029,7 @@ async function avatar() {
         const input = $('#' + id);
         if (input) input.oninput = updateOutputs;
       });
-      updateOutputs();
-      renderScriptUnits();
+      initializeStudioDraft();
       if (avatarStatus.configured) void loadLive2DModel(avatarStatus.model_url);
       else safeSet('#avatarModelState', 'textContent', '未找到胡桃模型，请检查 LIVE2D_MODEL_ROOT');
     };
@@ -963,6 +1072,7 @@ function updateOutputs() {
     ? `${speedText}（当前语音模型不支持）`
     : speedText);
   if (volume) safeSet('#volumeOut', 'textContent', Math.round(Number(volume.value) * 100) + '%');
+  if (volume && gainNode && audioCtx) gainNode.gain.setTargetAtTime(Number(volume.value), audioCtx.currentTime, 0.015);
   if (pitch) safeSet('#pitchOut', 'textContent', (Number(pitch.value) > 0 ? '+' : '') + pitch.value);
   if (temperature) safeSet('#temperatureOut', 'textContent', Number(temperature.value).toFixed(2));
   if (repetition) safeSet('#repetitionOut', 'textContent', Number(repetition.value).toFixed(2));
@@ -970,14 +1080,24 @@ function updateOutputs() {
 
 async function ensure() {
   if (session) return session;
+  if (sessionRequest) return sessionRequest;
   const vehicleSelect = $('#vehicle');
   const scriptInput = $('#script');
   const voiceSelect = $('#voice');
   if (!vehicleSelect || !scriptInput || !voiceSelect) {
     throw new Error('页面未完全加载，请稍后重试');
   }
-  session = await api('/live/sessions', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({vehicle:vehicleSelect.value, script:scriptInput.value, voice_id:voiceSelect.value})});
-  return session;
+  const loadingId = activeViewLoading;
+  const request = api('/live/sessions', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({vehicle:vehicleSelect.value, script:scriptInput.value, voice_id:voiceSelect.value})});
+  sessionRequest = request;
+  try {
+    const result = await request;
+    if (sessionRequest !== request || activeViewLoading !== loadingId) throw new DOMException('会话已取消', 'AbortError');
+    session = result;
+    return result;
+  } finally {
+    if (sessionRequest === request) sessionRequest = null;
+  }
 }
 
 // GPT-SoVITS mode 1 returns stable phrase-sized PCM fragments. The browser
@@ -1014,7 +1134,7 @@ function stopLive({suspend = false} = {}) {
   if (suspend && audioCtx?.state === 'running') audioCtx.suspend();
 }
 
-function stopGpt() { stopLive({suspend:true}); }
+function stopGpt() { stop(); }
 
 async function ensureAudio() {
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -1052,10 +1172,10 @@ function sharedPrefixLength(before, after) {
 
 function finishRunIfDrained(run) {
   if (run.stopped || run.failed || liveRun !== run || run.inFlight || run.pendingRestartAt !== null || run.sources.size || run.nextIndex < run.q.length) return;
-  setState(`流式播报完成 · 共 ${run.q.length} 句`);
   saveLiveState('completed', run.q.length);
   window.CarLiveFeatures?.flushPlayback();
   liveRun = null;
+  setState(`播报完成 · 共 ${run.q.length} 句`);
 }
 
 function appendBytes(left, right) {
@@ -1220,7 +1340,7 @@ function waitWhilePaused(run) {
 }
 
 async function streamGptUnit(run) {
-  if (run.stopped || liveRun !== run || run.paused) return;
+  if (run.stopped || liveRun !== run || run.paused || run.inFlight) return;
   if (run.nextIndex >= run.q.length) { finishRunIfDrained(run); return; }
   const index = run.nextIndex;
   const batchEnd = Math.min(run.q.length, index + STREAM_BATCH_UNITS);
@@ -1247,6 +1367,7 @@ async function streamGptUnit(run) {
       if (run.stopped || liveRun !== run) { try { await reader.cancel(); } catch {} return; }
       if (revision !== run.revision) { try { await reader.cancel(); } catch {} break; }
       const {done, value} = await reader.read();
+      if (run.stopped || liveRun !== run) { try { await reader.cancel(); } catch {} return; }
       if (done) break;
       if (revision !== run.revision) { try { await reader.cancel(); } catch {} break; }
       flush = consumeStreamBytes(run, value, index, batchEnd);
@@ -1307,9 +1428,15 @@ function speakBrowserUnit(run) {
   run.currentIndex = index;
   const utterance = new SpeechSynthesisUtterance(run.q[index]);
   utterance.lang = 'zh-CN'; utterance.rate = Number(document.querySelector('#speed')?.value || 1); utterance.volume = Number(document.querySelector('#volume')?.value || 1);
+  utterance.pitch = Math.pow(2, Number(document.querySelector('#pitch')?.value || 0) / 12);
   utterance.onstart = () => { setState(`浏览器语音播报 · 第 ${index + 1} / ${run.q.length} 句`, run.q[index]); saveLiveState('playing', index); };
   utterance.onend = () => { if (!run.stopped) speakBrowserUnit(run); };
-  utterance.onerror = event => { if (!run.stopped && event.error !== 'canceled') setState('浏览器语音播放失败：' + event.error); };
+  utterance.onerror = event => {
+    if (!run.stopped && event.error !== 'canceled') {
+      run.failed = true;
+      setState('浏览器语音播放失败：' + event.error);
+    }
+  };
   speechSynthesis.speak(utterance);
 }
 
@@ -1324,18 +1451,22 @@ function startBrowserRun(q, startIndex = 0) {
 }
 
 async function resumeLive(run) {
-  run.paused = false;
-  if (run.mode === 'browser') { speechSynthesis.resume(); setState('浏览器语音继续播报'); return; }
+  if (run.mode === 'browser') { run.paused = false; speechSynthesis.resume(); setState('浏览器语音继续播报'); return; }
   try { await ensureAudio(); } catch (error) { setState('无法恢复音频：' + error.message); return; }
+  if (run.stopped || liveRun !== run) return;
+  run.paused = false;
   const resume = run.resumeWaiter; run.resumeWaiter = null; resume?.();
   if (!run.inFlight) void streamGptUnit(run);
   setState(`${serverTtsLabel()} 流式播报已继续`);
 }
 
 async function syncTtsMode() {
+  const loadingId = activeViewLoading;
+  const intent = audioIntent;
   const wantsGpt = selectedVoiceWantsGpt();
   try {
     const status = await api('/tts/status');
+    if (activeViewLoading !== loadingId || intent !== audioIntent) return ttsMode;
     ttsStatus = status;
     ttsCheckedAt=performance.now();
     // `provider: browser` is also returned while GPT-SoVITS is warming or
@@ -1345,6 +1476,7 @@ async function syncTtsMode() {
       ? 'gpt-sovits'
       : 'browser';
   } catch {
+    if (activeViewLoading !== loadingId || intent !== audioIntent) return ttsMode;
     ttsStatus = null;
     ttsMode = wantsGpt ? 'gpt-sovits' : 'browser';
   }
@@ -1364,6 +1496,7 @@ async function waitForGptReady(maxAttempts = 120) {
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     if (intent !== audioIntent) return false;
     await syncTtsMode();
+    if (intent !== audioIntent) return false;
     if (ttsStatus?.provider !== 'browser' && ttsStatus?.ready) return true;
     if (ttsStatus?.configured === false) return false;
     if (attempt + 1 < maxAttempts) {
@@ -1375,34 +1508,43 @@ async function waitForGptReady(maxAttempts = 120) {
 }
 
 async function play() {
-  const intent=++audioIntent;
-  audioRequestedAt=performance.now();
-  // Resume/create Web Audio before the first network await. Browsers associate
-  // autoplay permission with the original click task; waiting for session
-  // creation first can leave the context suspended while TTS still succeeds.
-  let audioReady = false;
-  try { await ensureAudio(); audioReady = true; } catch {}
-  await syncTtsMode();
-  if (selectedVoiceWantsGpt()) {
-    const ready = await waitForGptReady();
-    if (intent !== audioIntent) return;
-    if (!ready) {
-      setState(`${serverTtsLabel()} 暂不可用，未切换为网页机械音；请确认语音服务配置后重试`);
-      return;
-    }
-    ttsMode = 'gpt-sovits';
-  }
-  if (ttsMode === 'gpt-sovits' && !audioReady) {
-    try { await ensureAudio(); } catch (error) { setState('无法启动音频输出：' + error.message); return; }
-  }
-  try { await ensure(); } catch (error) { setState('无法创建直播会话：' + error.message); return; }
-  if (intent !== audioIntent) return;
-  if (liveRun?.paused) { await resumeLive(liveRun); return; }
+  if (playPending || (liveRun && !liveRun.paused && !liveRun.failed)) return;
   const scriptInput = $('#script');
-  if (!scriptInput) { setState('页面未加载完成'); return; }
-  const q = sentenceList(normalizeSpeechText(scriptInput.value));
+  const scriptText = scriptInput?.value || '';
+  const q = sentenceList(normalizeSpeechText(scriptText));
   if (!q.length) return setState('请先填写直播稿');
-  if (ttsMode === 'gpt-sovits') await startGptRun(q); else startBrowserRun(q);
+  const intent=++audioIntent;
+  playPending = intent;
+  updatePlaybackControls();
+  audioRequestedAt=performance.now();
+  try {
+    if (liveRun?.paused) { await resumeLive(liveRun); return; }
+    if (selectedVoiceWantsGpt()) {
+      // Unlock audio while the original click still grants autoplay permission.
+      await ensureAudio();
+      if (intent !== audioIntent) return;
+      const ready = await waitForGptReady();
+      if (intent !== audioIntent) return;
+      if (!ready) return setState(`${serverTtsLabel()} 暂不可用，请检查语音服务后重试`);
+      ttsMode = 'gpt-sovits';
+    } else {
+      ttsMode = 'browser';
+    }
+    if (intent !== audioIntent) return;
+    const saved = await ensure();
+    if (intent !== audioIntent) return;
+    if (saved.script != null && saved.script !== scriptText) {
+      const updated = await api('/live/sessions/' + saved.id + '/script', {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({script:scriptText, sentence:0})});
+      if (intent !== audioIntent) return;
+      session = updated;
+      safeSet('#version', 'textContent', '会话版本 v' + session.version);
+    }
+    if (ttsMode === 'gpt-sovits') await startGptRun(q); else startBrowserRun(q);
+  } catch (error) {
+    if (intent === audioIntent && error.name !== 'AbortError') setState('无法开始播报：' + error.message);
+  } finally {
+    if (playPending === intent) { playPending = 0; updatePlaybackControls(); }
+  }
 }
 
 function pause() {
@@ -1410,22 +1552,49 @@ function pause() {
   liveRun.paused = true;
   lipSync.resetMouth();
   if (liveRun.mode === 'browser') speechSynthesis.pause(); else if (audioCtx?.state === 'running') audioCtx.suspend();
+  saveLiveState('paused', liveRun.currentIndex);
   setState('已暂停；修改稿件后可继续播放新内容');
 }
 
-function stop() { audioIntent++; stopLive({suspend:true}); speechSynthesis.cancel(); setState('已停止'); }
+function stop() {
+  audioIntent++;
+  playPending = 0;
+  if (liveRun) saveLiveState('stopped', liveRun.currentIndex);
+  stopLive({suspend:true});
+  speechSynthesis.cancel();
+  setState('已停止');
+}
 
 async function revise() {
+  if (revisionPending) return;
   const scriptInput = $('#script');
   if (!scriptInput) return setState('页面未加载完成');
-  const nextQueue = sentenceList(normalizeSpeechText(scriptInput.value));
+  const scriptText = scriptInput.value;
+  const nextQueue = sentenceList(normalizeSpeechText(scriptText));
   if (!nextQueue.length) return setState('改稿内容不能为空');
-  const saved = await ensure();
+  const requestId = Symbol('revision');
+  revisionPending = requestId;
+  const loadingId = activeViewLoading;
+  const intent = audioIntent;
   const run = liveRun;
+  updatePlaybackControls();
+  let saved;
   const beforeQueue = run ? run.q.slice() : [];
   const changedAt = run ? sharedPrefixLength(run.q, nextQueue) : 0;
-  const safeIndex = run ? safePlaybackIndex(run) : 0;
-  session = await api('/live/sessions/' + saved.id + '/script', {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({script:scriptInput.value, sentence:changedAt})});
+  try {
+    saved = await ensure();
+    if (loadingId !== activeViewLoading || intent !== audioIntent) return;
+    const updated = await api('/live/sessions/' + saved.id + '/script', {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({script:scriptText, sentence:changedAt})});
+    if (loadingId !== activeViewLoading || intent !== audioIntent || session?.id !== saved.id) return;
+    session = updated;
+  } catch (error) {
+    if (loadingId === activeViewLoading && intent === audioIntent && error.name !== 'AbortError') setState('改稿保存失败：' + error.message);
+    return;
+  } finally {
+    if (revisionPending === requestId) { revisionPending = false; updatePlaybackControls(); }
+  }
+  // Playback may have advanced while the save request was in flight.
+  const safeIndex = run ? (run.mode === 'browser' ? run.currentIndex : safePlaybackIndex(run)) : 0;
   safeSet('#version', 'textContent', '会话版本 v' + session.version);
   window.CarLiveFeatures?.revision();
   if (!run || run.stopped) { setState('稿件已同步；点击”开始播放”后使用新稿'); return; }
@@ -1497,6 +1666,18 @@ async function ask() {
   const answerNode = $('#answer');
 
   if (!vehicleSelect || !questionInput) return;
+  if (questionRequest) return;
+  const question = questionInput.value.trim();
+  clearAnswer();
+  if (question.length < 2) {
+    if (answerNode) answerNode.textContent = '请输入至少两个字的问题';
+    return;
+  }
+  const request = new AbortController();
+  questionRequest = request;
+  safeSet('#ask', 'disabled', true);
+  safeSet('#ask', 'textContent', '检索中…');
+  updatePlaybackControls();
 
   // 显示加载状态
   if (answerNode && answerNode.isConnected) {
@@ -1508,14 +1689,16 @@ async function ask() {
     const r = await api('/query', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
+      signal: request.signal,
       body: JSON.stringify({
-        question: questionInput.value,
+        question,
         brand: option?.dataset.brand || '',
         series: option?.dataset.series || '',
         year: option?.dataset.year || ''
       })
     });
 
+    if (questionRequest !== request || !answerNode?.isConnected) return;
     currentAnswer = r.answer;
     const generation = r.generation?.status === 'fallback' ? ` · ${esc(r.generation.reason)}` : '';
     const conflict = (r.conflict_warnings || []).map(x => `<div class="notice warning">${esc(x)}</div>`).join('');
@@ -1524,28 +1707,45 @@ async function ask() {
       answerNode.innerHTML = `${conflict}<div class="notice">${esc(r.answer)}</div><p class="hint">${r.provider === 'llm-grounded-rag' ? '大模型依据回答' : '本地资料摘录'} · 语义混合检索＋独立重排 · 依据充分度：${esc(({high: '高', medium: '中', low: '不足'})[r.confidence] || r.confidence)}${generation}</p>${r.sources.map((s, i) => `<details class="source"><summary>[${i + 1}] ${esc(s.document_name)} · v${s.version || 1}${s.page ? ' · 第' + s.page + '页' : ''} · 重排相关度 ${Math.round(Math.min(1, s.score) * 100)}%</summary><p>${esc(s.content)}</p><small>${esc(s.metadata.series || '')} · ${esc(s.metadata.kind || '资料')} · ${esc(s.license || '来源待审核')}</small>${(s.metadata.warnings || []).map(w => `<p class="hint warning">${esc(w)}</p>`).join('')}${s.source_url && /^https?:\/\//.test(s.source_url) ? `<p><a href="${esc(s.source_url)}" target="_blank" rel="noopener noreferrer">查看原始来源</a></p>` : ''}</details>`).join('')}`;
     }
   } catch (error) {
+    if (error.name === 'AbortError' || questionRequest !== request) return;
     if (answerNode && answerNode.isConnected) {
       answerNode.innerHTML = `<div class="notice error">检索失败：${esc(error.message)}</div><button class="btn secondary" onclick="ask()">重试</button>`;
     }
     console.error('❌ Ask failed:', error);
+  } finally {
+    if (questionRequest === request) {
+      questionRequest = null;
+      safeSet('#ask', 'disabled', false);
+      safeSet('#ask', 'textContent', '检索回答');
+      updatePlaybackControls();
+    }
   }
 }
 
 async function speakText(text) {
-  const intent=++audioIntent;
-  audioRequestedAt=performance.now();
-  await ensureAudio();
-  const speakable = normalizeSpeechText(text);
-  const q = sentenceList(speakable);
+  if (playPending) return;
+  const q = sentenceList(normalizeSpeechText(text));
   if (!q.length) return;
-  await syncTtsMode();
-  if (selectedVoiceWantsGpt()) {
-    const ready = await waitForGptReady();
-    if (intent !== audioIntent) return;
-    if (!ready) return setState(`${serverTtsLabel()} 暂不可用，未切换为网页机械音`);
-    return startGptRun(q);
+  const intent=++audioIntent;
+  playPending = intent;
+  updatePlaybackControls();
+  audioRequestedAt=performance.now();
+  try {
+    if (selectedVoiceWantsGpt()) {
+      await ensureAudio();
+      if (intent !== audioIntent) return;
+      const ready = await waitForGptReady();
+      if (intent !== audioIntent) return;
+      if (!ready) return setState(`${serverTtsLabel()} 暂不可用，请检查语音服务后重试`);
+      await startGptRun(q);
+    } else if (intent === audioIntent) {
+      startBrowserRun(q);
+    }
+  } catch (error) {
+    if (intent === audioIntent && error.name !== 'AbortError') setState('播报失败：' + error.message);
+  } finally {
+    if (playPending === intent) { playPending = 0; updatePlaybackControls(); }
   }
-  startBrowserRun(q);
 }
 
 function ttsBody(text, unitized = false, streamBatch = false) {
@@ -1677,7 +1877,7 @@ async function generateScript() {
   `;
 
   document.body.append(dialog);
-  requestAnimationFrame(() => dialog.showModal());
+  requestAnimationFrame(() => { if (dialog.isConnected) dialog.showModal(); });
 
   dialog.querySelector('[data-close]')?.addEventListener('click', () => dialog.close());
   dialog.addEventListener('click', (e) => {
@@ -1723,7 +1923,7 @@ async function generateScript() {
         renderScriptUnits();
       }
 
-      setState(result.notice || '✓ 已生成新直播稿');
+      if (scriptInput?.isConnected) setState(result.notice || '已生成新直播稿');
       dialog.close();
     } catch (error) {
       dialog.querySelector('#generateMessage').textContent = '✗ 生成失败：' + error.message;
@@ -1890,11 +2090,12 @@ async function cloneVoice() {
       safeSet('#cloneState', 'textContent', value >= 100 ? '音频已上传，正在生成标准 PCM 并预热…' : `上传参考音频… ${value}%`);
     });
     localStorage.setItem('selectedVoiceId', result.id);
-    await studio();
+    apiCache.data.clear(); apiCache.timestamps.clear();
+    if (currentView !== 'voices') return;
+    activateView('studio');
     safeSet('#cloneState', 'textContent', result.quality_hint || '音色已创建，正在预热…');
-    const capture = $('#cloneCapture');
     await waitForVoiceWarmup(result.id);
-    if ($('#cloneCapture') === capture) await studio();
+    apiCache.data.clear(); apiCache.timestamps.clear();
   } catch (error) {
     safeSet('#cloneState', 'textContent', error.message);
     if (stateNode) stateNode.classList.add('warning');
@@ -1905,6 +2106,7 @@ async function cloneVoice() {
 }
 
 async function tests() {
+  if (!beginViewLoad('tests')) return;
   layout('效果验证', '一键复测检索准确率、回答命中率与语音首包延迟，并可导出完整测试数据。', '<div id="testResult">测试中…</div>', {eyebrow:'扩展能力', tag:'量化测试报告'});
 
   const resultNode = document.querySelector('#testResult');
@@ -1921,6 +2123,7 @@ async function tests() {
       resultNode.innerHTML = '<div class="notice">正在测试 TTS 首包延迟…</div>';
     }
 
+    if (!resultNode.isConnected) return;
     const tts = await api('/tests/tts', {method:'POST'});
     const stats = await api('/analytics');
 
@@ -1937,19 +2140,19 @@ async function tests() {
   }
 }
 
-let currentView = '';
-
 function activateView(view, {updateHash = true} = {}) {
-  const button = document.querySelector(`nav button[data-view="${view}"]`);
   const loader = viewLoaders()[view];
-  if (!button || !loader) return false;
+  if (typeof loader !== 'function') return false;
+  const button = [...document.querySelectorAll('nav button')].find(node => node.dataset.view === view);
+  if (!button) return false;
   if (updateHash && location.hash !== '#' + view) location.hash = view;
   // The hash write above fires hashchange; only render when the view changes.
   if (view === currentView) return true;
   currentView = view;
   stopCurrentView();
+  app.dataset.view = view;
   document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x === button));
-  loader().catch(showViewError);
+  void renderView(view);
   return true;
 }
 
@@ -1973,3 +2176,4 @@ if (document.readyState === 'loading') {
   activateInitialView();
 }
 startHealthMonitor();
+window.addEventListener('pagehide', () => { saveStudioDraft(); stop(); });
