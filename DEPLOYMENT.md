@@ -16,6 +16,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r backend\requirements.txt
 Copy-Item backend\.env.example backend\.env
+python scripts\setup_rag_models.py
 ```
 
 运行 `python scripts\setup_rag_models.py` 会自动合并仓库内的 Reranker 分片，并校验 Embedding、Reranker、分词器和配置，共约 306 MiB；完成后可在本地 CPU 上离线运行知识库检索。

@@ -15,7 +15,9 @@ cloning, run this from the repository root to join and verify it:
 python scripts\setup_rag_models.py
 ```
 
-The script joins the bundled parts before checking the pinned public model
-source. It only downloads anything when a bundled file is missing or invalid.
+The script joins the bundled parts and checks the local manifests first, so a
+complete checkout needs no network access. It downloads from the pinned public
+model source only when a bundled file is missing or invalid.
 The generated `model_quantized.onnx` is ignored locally and is never committed
 as a fourth copy. `manifest.json` records SHA256 checksums for every model file.
+Git attributes preserve model and tokenizer bytes on Windows and Linux.

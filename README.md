@@ -44,4 +44,4 @@ powershell -ExecutionPolicy Bypass -File .\install-startup.ps1
 powershell -ExecutionPolicy Bypass -File .\install-startup.ps1 -Remove
 ```
 
-RAG 模型随仓库通过 Git LFS 提供。运行数据、上传文件、数据库、日志、TTS 模型及其源码不包含在仓库中。
+RAG 模型随仓库提供，Reranker 分片由安装脚本合并。运行数据、上传文件、数据库、日志、TTS 模型及其源码不包含在仓库中。
