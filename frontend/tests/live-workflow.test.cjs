@@ -234,6 +234,18 @@ test('the first GPT stream request contains only the first phrase', async () => 
   assert.equal(body.stream_batch, true);
 });
 
+test('voice priming pre-generates the current first phrase with live settings', async () => {
+  const h = harness();
+  h.run("ttsMode='gpt-sovits';");
+  await h.run("primeVoice('voice-test', '第一句。')");
+  assert.equal(h.requests.length, 1);
+  assert.match(h.requests[0].url, /\/voices\/voice-test\/prime$/);
+  const body = JSON.parse(h.requests[0].options.body);
+  assert.equal(body.text, '第一句。');
+  assert.equal(body.unitized, true);
+  assert.equal(body.stream_batch, true);
+});
+
 test('script and answer timers stop on failures, stop and navigation', async () => {
   const h=harness();
   h.run('startLatencyTimer()');

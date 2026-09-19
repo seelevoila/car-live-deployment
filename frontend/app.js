@@ -899,21 +899,27 @@ async function studio() {
       const scriptFile = $('#scriptFile');
       if (scriptFile) scriptFile.onchange = readScriptFile;
       const scriptInput = $('#script');
-      if (scriptInput) scriptInput.oninput = renderScriptUnits;
+      if (scriptInput) {
+        scriptInput.oninput = renderScriptUnits;
+        scriptInput.onchange = primeSelectedVoice;
+      }
       safeClick('#generate', generateScript);
       safeClick('#previewVoice', () => previewVoice());
       safeClick('#stopPreview', () => { stopGpt(); speechSynthesis.cancel(); setState('已停止试听'); });
       ['speed','volume','pitch'].forEach(id => {
         const input = $('#' + id);
-        if (input) input.oninput = () => updateOutputs();
+        if (input) {
+          input.oninput = () => updateOutputs();
+          if (id === 'speed') input.onchange = primeSelectedVoice;
+        }
       });
       updateOutputs();
       initializeVoicePicker(voices);
       renderTtsMode();
-      primeSelectedVoice();
       const vehicleSelect = $('#vehicle');
       if (dash.vehicles.length && vehicleSelect) vehicleSelect.value = [first.brand,first.series,first.year].join(' / ');
       initializeStudioDraft();
+      primeSelectedVoice();
     };
 
     // 优先渲染界面，然后异步初始化
@@ -1147,12 +1153,19 @@ async function avatar() {
       const scriptFile = $('#scriptFile');
       if (scriptFile) scriptFile.onchange = readScriptFile;
       const scriptInput = $('#script');
-      if (scriptInput) scriptInput.oninput = renderScriptUnits;
+      if (scriptInput) {
+        scriptInput.oninput = renderScriptUnits;
+        scriptInput.onchange = primeSelectedVoice;
+      }
       ['speed','volume','pitch'].forEach(id => {
         const input = $('#' + id);
-        if (input) input.oninput = updateOutputs;
+        if (input) {
+          input.oninput = updateOutputs;
+          if (id === 'speed') input.onchange = primeSelectedVoice;
+        }
       });
       initializeStudioDraft();
+      primeSelectedVoice();
       if (avatarStatus.configured) void loadLive2DModel(avatarStatus.model_url);
       else safeSet('#avatarModelState', 'textContent', '未找到胡桃模型，请检查 LIVE2D_MODEL_ROOT');
     };
@@ -1173,14 +1186,27 @@ async function avatar() {
 function primeSelectedVoice() {
   const voiceId = document.querySelector('#voice')?.value;
   if (!voiceId || ttsMode !== 'gpt-sovits') return;
-  void primeVoice(voiceId);
+  const firstUnit = sentenceList(normalizeSpeechText(document.querySelector('#script')?.value || ''))[0] || '';
+  void primeVoice(voiceId, firstUnit);
 }
 
-async function primeVoice(voiceId) {
+async function primeVoice(voiceId, firstUnit = '') {
   if (!voiceId || ttsMode !== 'gpt-sovits') return;
   const token = ++voicePrimeToken;
   voicePrimeInFlight = true; updatePlaybackControls();
-  try { await api('/voices/' + encodeURIComponent(voiceId) + '/prime', {method:'POST'}); } catch {}
+  const options = {method:'POST'};
+  if (firstUnit) {
+    options.headers = {'Content-Type':'application/json'};
+    options.body = ttsBody(firstUnit, true, true);
+  }
+  if (firstUnit) setState('正在准备所选音色和当前稿件首段');
+  try {
+    const result = await api('/voices/' + encodeURIComponent(voiceId) + '/prime', options);
+    if (!result.ready) throw new Error('当前音色或稿件首段准备失败');
+    if (token === voicePrimeToken) setState(result.first_unit_cached ? '音色和稿件首段已就绪' : '音色已就绪');
+  } catch (error) {
+    if (token === voicePrimeToken) setState('音色准备未完成：' + error.message);
+  }
   finally { if (token === voicePrimeToken) { voicePrimeInFlight = false; updatePlaybackControls(); } }
 }
 
@@ -2058,6 +2084,7 @@ async function readScriptFile(event) {
     if (scriptInput) {
       scriptInput.value = await file.text();
       renderScriptUnits();
+      primeSelectedVoice();
     }
   }
 }
@@ -2152,6 +2179,7 @@ async function generateScript() {
       if (scriptInput && scriptInput.isConnected) {
         scriptInput.value = result.script;
         renderScriptUnits();
+        primeSelectedVoice();
       }
 
       if (scriptInput?.isConnected) setState(result.notice || '已生成新直播稿');

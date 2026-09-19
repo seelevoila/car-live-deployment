@@ -1494,22 +1494,23 @@ def _warm_single_voice(voice_id: str):
         VOICE_WARMING.discard(voice_id)
 
 
-def _prime_voice_profile(voice_id: str):
-    """Pay the global GPT-SoVITS weight-switch cost before live playback.
+def _prime_voice_profile(voice_id: str, first_request: TTSRequest | None = None):
+    """Pay model/reference setup and optional checked first-unit cost before playback.
 
     GPT-SoVITS keeps one model pair in process-global state. A clone bound to
     a custom installed profile otherwise makes the first live sentence wait
-    for a weight swap. Priming runs the same locked, tiny request used by
-    warmup so the subsequent live request starts with the selected profile
-    already resident.
+    for a weight swap. For checked clones, the current first unit is also
+    generated and validated into the production cache before the UI reports
+    readiness.
     """
     if not settings.gpt_sovits_url or voice_id in VOICE_PROFILE_WARMING:
-        return
+        return False
     profile = _voice_model_profile(voice_id)
+    cache_first_unit = first_request is not None and _voice_prompt_policy(voice_id) == 'checked'
     VOICE_PROFILE_WARMING.add(voice_id)
     try:
         _voice_synthesis_gate(voice_id)
-        request = TTSRequest(text=CLONE_VALIDATION_TEXT, voice_id=voice_id)
+        request = first_request or TTSRequest(text=CLONE_VALIDATION_TEXT, voice_id=voice_id)
         with _tts_lock(priority="foreground", timeout=20):
             with httpx.Client(timeout=180, trust_env=False) as client:
                 # Re-check after acquiring the scheduler. Calibration or a
@@ -1521,18 +1522,22 @@ def _prime_voice_profile(voice_id: str):
                 if response.is_success:
                     _mark_tts_success()
                     VOICE_WARMED.add(voice_id)
-                    return
-                if response.status_code != 404:
+                elif response.status_code != 404:
                     response.raise_for_status()
-                if voice_id in VOICE_WARMED:
-                    return
-                with client.stream("POST", _tts_endpoint(), json=params) as response:
-                    response.raise_for_status()
-                    for _ in response.iter_raw(8192):
-                        pass
+                elif voice_id not in VOICE_WARMED:
+                    with client.stream("POST", _tts_endpoint(), json=params) as response:
+                        response.raise_for_status()
+                        for _ in response.iter_raw(8192):
+                            pass
+                if cache_first_unit:
+                    audio, check = _checked_voice_probe(client, params, _model_profile_identity(profile))
+                    prompt_guard.record_status(voice_id, uuid4().hex, [check])
+                    if audio is None:
+                        raise RuntimeError('当前稿件首段未通过音频检查')
                 VOICE_WARMED.add(voice_id)
+                return cache_first_unit
     except Exception:
-        pass
+        return False
     finally:
         VOICE_PROFILE_WARMING.discard(voice_id)
         if voice_id in VOICE_WARMED:
@@ -1872,6 +1877,18 @@ def _voice_model_profile(voice_id: str):
 
 def _model_profile_weights(profile: str):
     return profile_weights(settings, profile)
+
+
+def _model_profile_identity(profile: str):
+    weights = _model_profile_weights(profile)
+    return [
+        settings.gpt_sovits_model_version,
+        profile,
+        [
+            (str(path), Path(path).stat().st_mtime_ns if path and Path(path).is_file() else None)
+            for path in weights
+        ],
+    ]
 
 
 def _ensure_model_profile_loaded(profile: str, client: httpx.Client):
@@ -2554,9 +2571,7 @@ async def _guarded_prompt_stream(req: TTSRequest, request: Request, units: list[
     request_id=uuid4().hex
     checks=[]
     profile=_voice_model_profile(req.voice_id)
-    weights=_model_profile_weights(profile)
-    identity=[settings.gpt_sovits_model_version,profile,
-              [(str(path),Path(path).stat().st_mtime_ns if path and Path(path).is_file() else None) for path in weights]]
+    identity=_model_profile_identity(profile)
 
     async def prepare(sentence):
         params=_live_unit_params(req.model_copy(update={'text':sentence}),0)
@@ -3100,7 +3115,7 @@ def calibrate_voice(voice_id: str):
 
 
 @app.post("/api/voices/{voice_id}/prime")
-def prime_voice(voice_id: str):
+def prime_voice(voice_id: str, req: TTSRequest | None = None):
     """Preload a voice's model profile before the operator starts playback."""
     with conn() as c:
         row = c.execute("SELECT id FROM voices WHERE id=?", (voice_id,)).fetchone()
@@ -3113,8 +3128,17 @@ def prime_voice(voice_id: str):
     # view. The frontend fires it in the background on selection, while a user
     # who immediately presses Play still gets deterministic ordering via the
     # shared TTS lock.
-    _prime_voice_profile(voice_id)
-    return {"id": voice_id, "profile": profile, "warming": False, "ready": _ACTIVE_MODEL_PROFILE == profile}
+    first_request = None
+    if req is not None:
+        req = req.model_copy(update={'voice_id': voice_id, 'unitized': True, 'stream_batch': True})
+        units = _tts_stream_units(req)
+        if units:
+            first_request = req.model_copy(update={'text': units[0]})
+    requires_first_cache = first_request is not None and _voice_prompt_policy(voice_id) == 'checked'
+    first_unit_cached = _prime_voice_profile(voice_id, first_request)
+    ready = _ACTIVE_MODEL_PROFILE == profile and (not requires_first_cache or first_unit_cached)
+    return {"id": voice_id, "profile": profile, "warming": False,
+            "ready": ready, "first_unit_cached": first_unit_cached}
 
 
 @app.post("/api/voices/analyze")

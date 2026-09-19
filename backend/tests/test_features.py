@@ -147,6 +147,26 @@ def test_legacy_binding_cannot_change_builtin_identity(client,monkeypatch):
     assert client.get('/api/voice-presets').json()
 
 
+def test_voice_prime_passes_the_current_first_unit_to_checked_cache(client, monkeypatch):
+    captured = []
+    monkeypatch.setattr(settings, 'gpt_sovits_url', 'http://127.0.0.1:9881')
+    monkeypatch.setattr(main, '_prime_voice_profile', lambda voice_id, request=None: captured.append((voice_id, request)) or True)
+    response = client.post('/api/voices/steady/prime', json={
+        'voice_id': 'different-client-id',
+        'text': '第一段。第二段。',
+        'unitized': True,
+        'stream_batch': True,
+        'speed_factor': 1.0,
+        'delivery': 'natural',
+    })
+    assert response.status_code == 200
+    assert response.json()['first_unit_cached'] is True
+    voice_id, request = captured[0]
+    assert voice_id == 'steady'
+    assert request.voice_id == 'steady'
+    assert request.text == '第一段。第二段。'
+
+
 def test_lively_delivery_preserves_facts_and_keeps_speed_bounded():
     from app.tts_gpt_sovits import delivery_text
     assert delivery_text('大家好，欢迎来到直播间。','lively',1)[0].endswith('！')
