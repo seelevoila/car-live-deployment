@@ -1,0 +1,239 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>架构图预览</title>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({ startOnLoad: true, theme: 'default' });
+    </script>
+    <style>
+        body { font-family: Arial; padding: 20px; background: #f5f5f5; }
+        .diagram { background: white; padding: 20px; margin: 20px 0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h2 { color: #1976D2; }
+    </style>
+</head>
+<body>
+    <h1>🎨 汽车直播智能体 - 架构图预览</h1>
+
+    <div class="diagram">
+        <h2>01-系统架构图</h2>
+        <pre class="mermaid">
+
+graph TB
+    subgraph "交互层"
+        A[Web前端<br/>Vue.js 5173]
+        B[音频排程<br/>AudioContext]
+    end
+
+    subgraph "业务层"
+        C[FastAPI服务<br/>8000端口]
+        D[会话管理]
+        E[动态改稿引擎]
+        F[问答编排]
+    end
+
+    subgraph "数据层"
+        G[SQLite数据库<br/>文档/片段/版本/音色]
+        H[FAISS向量索引<br/>512维语义向量]
+        I[BM25词法索引<br/>中文双字词]
+    end
+
+    subgraph "模型层"
+        J[GPT-SoVITS<br/>9880端口]
+        K[BGE Embedding<br/>ONNX INT8]
+        L[BGE Reranker<br/>交叉编码器]
+    end
+
+    A --> C
+    B --> C
+    C --> D
+    C --> E
+    C --> F
+    D --> G
+    E --> J
+    F --> H
+    F --> I
+    F --> L
+    G --> H
+    J --> B
+    K --> H
+
+    style A fill:#E3F2FD
+    style B fill:#E3F2FD
+    style C fill:#BBDEFB
+    style J fill:#90CAF9
+    style K fill:#90CAF9
+    style L fill:#90CAF9
+    style G fill:#FFF9C4
+    style H fill:#FFF9C4
+    style I fill:#FFF9C4
+
+        </pre>
+    </div>
+
+    <div class="diagram">
+        <h2>02-RAG检索Pipeline</h2>
+        <pre class="mermaid">
+
+flowchart TD
+    Start([用户提问]) --> A[问题预处理]
+    A --> B[BGE Embedding<br/>生成512维查询向量]
+
+    B --> C1[FAISS语义检索]
+    B --> C2[BM25词法检索]
+
+    C1 --> D1[Top 24候选]
+    C2 --> D2[Top 24候选]
+
+    D1 --> E[RRF融合<br/>k=60]
+    D2 --> E
+
+    E --> F[父块去重]
+    F --> G[BGE Reranker<br/>重排序]
+    G --> H[动力范围检查]
+    H --> I[Top 5结果]
+
+    I --> J{配置LLM?}
+    J -->|是| K[大模型生成]
+    J -->|否| L[本地摘录]
+
+    K --> M[冲突检查]
+    L --> M
+    M --> End([返回答案])
+
+    style Start fill:#4CAF50
+    style End fill:#4CAF50
+    style B fill:#2196F3
+    style G fill:#2196F3
+
+        </pre>
+    </div>
+
+    <div class="diagram">
+        <h2>03-TTS时序图</h2>
+        <pre class="mermaid">
+
+sequenceDiagram
+    participant U as 前端
+    participant F as FastAPI
+    participant T as GPT-SoVITS
+    participant A as Audio
+
+    U->>F: 提交脚本
+    F->>F: 自然停顿切分
+    F->>T: 请求合成短语1
+    T-->>F: 返回WAV
+    F->>F: 转PCM
+    F-->>A: 推送首包
+    Note over A: 2300ms<br/>开始播放
+
+    loop 后续短语
+        F->>T: 合成短语N
+        T-->>F: 返回WAV
+        F-->>A: 持续推送
+    end
+
+        </pre>
+    </div>
+
+    <div class="diagram">
+        <h2>04-改稿状态机</h2>
+        <pre class="mermaid">
+
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Loading: 提交脚本
+    Loading --> Playing: 首包到达
+    Playing --> Playing: 继续播放
+    Playing --> Paused: 暂停
+    Paused --> Playing: 继续
+    Playing --> EditRequested: 改稿
+    EditRequested --> ComputeBoundary: 计算边界
+    ComputeBoundary --> CancelPending: 取消待生成
+    CancelPending --> Playing: 新稿
+    Playing --> [*]: 完成
+
+        </pre>
+    </div>
+
+    <div class="diagram">
+        <h2>05-质量门禁</h2>
+        <pre class="mermaid">
+
+flowchart TD
+    Start([上传音频]) --> A[格式检查]
+    A --> B{时长5-10s?}
+    B -->|否| Fail1[拒绝]
+    B -->|是| C{采样率≥16k?}
+    C -->|否| Fail2[拒绝]
+    C -->|是| D[标准化处理]
+    D --> E[质量分析]
+    E --> F{人声>80%?}
+    F -->|否| Fail3[拒绝]
+    F -->|是| G{静音<20%?}
+    G -->|否| Fail4[拒绝]
+    G -->|是| H{削波<1%?}
+    H -->|否| Fail5[拒绝]
+    H -->|是| I[文本检查]
+    I --> J{匹配>90%?}
+    J -->|否| Fail6[拒绝]
+    J -->|是| K[声纹检查]
+    K --> L{相似度>85%?}
+    L -->|是| M[创建Profile]
+    L -->|否| M
+    M --> End([可用])
+
+    style Start fill:#4CAF50
+    style End fill:#4CAF50
+    Fail1 --> Failed([拒绝])
+    Fail2 --> Failed
+    Fail3 --> Failed
+    Fail4 --> Failed
+    Fail5 --> Failed
+    Fail6 --> Failed
+    style Failed fill:#F44336
+
+        </pre>
+    </div>
+
+    <div class="diagram">
+        <h2>06-数据流向</h2>
+        <pre class="mermaid">
+
+flowchart LR
+    A1[PDF] --> B1[解析]
+    A2[DOCX] --> B1
+    A3[TXT] --> B1
+
+    B1 --> B2[清洗]
+    B2 --> B3[分块]
+    B3 --> C1[(SQLite)]
+    B3 --> D1[BGE编码]
+    D1 --> C2[(FAISS)]
+
+    C1 --> E1[BM25]
+    C2 --> E2[FAISS检索]
+
+    E1 --> F1[RRF融合]
+    E2 --> F1
+    F1 --> F2[重排序]
+    F2 --> G1[大模型]
+    F2 --> G2[本地摘录]
+
+    G1 --> H1[答案]
+    G2 --> H1
+    H1 --> I1[TTS]
+    I1 --> J1[音频]
+
+    style A1 fill:#E1F5FE
+    style A2 fill:#E1F5FE
+    style A3 fill:#E1F5FE
+    style J1 fill:#F8BBD0
+
+        </pre>
+    </div>
+
+</body>
+</html>

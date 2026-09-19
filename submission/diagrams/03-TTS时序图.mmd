@@ -1,0 +1,19 @@
+sequenceDiagram
+    participant U as 前端
+    participant F as FastAPI
+    participant T as GPT-SoVITS
+    participant A as Audio
+
+    U->>F: 提交脚本
+    F->>F: 自然停顿切分
+    F->>T: 请求合成短语1
+    T-->>F: 返回WAV
+    F->>F: 转PCM
+    F-->>A: 推送首包
+    Note over A: 2300ms<br/>开始播放
+
+    loop 后续短语
+        F->>T: 合成短语N
+        T-->>F: 返回WAV
+        F-->>A: 持续推送
+    end

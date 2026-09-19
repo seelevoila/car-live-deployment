@@ -1,4 +1,5 @@
 let voiceRecorder = null;
+// Backend API endpoint (SimpleHTTPServer cannot proxy, use direct URL)
 const API = 'http://127.0.0.1:8000/api';
 const app = document.querySelector('#app');
 let session = null;
@@ -7,6 +8,12 @@ let currentView = '';
 let playPending = 0;
 let revisionPending = false;
 let questionRequest = null;
+let ttsLatencyTimer = null;
+let ttsLatencyStartTime = 0;
+let ttsReadinessTimer = null;
+let voicePrimeToken = 0;
+let voicePrimeInFlight = false;
+let voiceReferencePrompts = new Map();
 
 // Track active view loading to prevent race conditions
 let activeViewLoading = null;
@@ -86,9 +93,6 @@ let audioRequestedAt = 0;
 
 function serverTtsLabel() {
   if (ttsStatus?.provider_label) return ttsStatus.provider_label;
-  if (ttsStatus?.provider === 'idextts2') {
-    return ttsStatus?.model_version ? `IndexTTS-${ttsStatus.model_version}` : 'IndexTTS';
-  }
   return 'GPT-SoVITS';
 }
 
@@ -311,6 +315,7 @@ function renderScriptUnits() {
       ? `播报切分：${units.map((unit, index) => `<span>${index + 1}. ${esc(unit)}</span>`).join('')}`
       : '播报切分：暂无内容';
     saveStudioDraft();
+    renderReferenceCoverage();
     updatePlaybackControls();
   } catch (err) {
     console.warn('⚠️ renderScriptUnits failed:', err.message);
@@ -318,7 +323,7 @@ function renderScriptUnits() {
 }
 
 const CN_DIGITS = ['零','一','二','三','四','五','六','七','八','九'];
-const TTS_ATOMIC_TOKEN = /(?:百分之[零一二三四五六七八九十百千万亿兆点\d.]+|\d+(?:\.\d+)?\s*(?:km\/h|kWh|N·m|km|kW|Nm|公里|毫米|小时|秒|%|L|万元|万|元|年|款|版|型号|EV)?|[零一二三四五六七八九十百千万亿兆点]+(?:公里每小时|千瓦时|牛米|公里|毫米|小时|秒|百分之|升|万元|元|年|款|版|型号|EV)?)/gi;
+const TTS_ATOMIC_TOKEN = /(?:[A-Za-z]+(?:\/[A-Za-z]+)?|百分之[零一二三四五六七八九十百千万亿兆点\d.]+|\d+(?:\.\d+)?\s*(?:km\/h|kWh|N·m|km|kW|Nm|公里|毫米|小时|秒|%|L|万元|万|元|年|款|版|型号|EV)?|[零一二三四五六七八九十百千万亿兆点]+(?:公里每小时|千瓦时|牛米|公里|毫米|小时|秒|百分之|升|万元|元|年|款|版|型号|EV)?)/gi;
 function safeSpeechCut(text, limit) {
   if (text.length <= limit) return text.length;
   let end = Math.max(1, limit);
@@ -489,14 +494,35 @@ function updatePlaybackControls() {
   const busy = Boolean(playPending);
   const running = Boolean(liveRun && !liveRun.stopped && !liveRun.failed);
   const hasScript = Boolean(document.querySelector('#script')?.value.trim());
-  safeSet('#play', 'disabled', busy || !hasScript || (running && !liveRun.paused));
+  const ready = playbackReady();
+  safeSet('#play', 'disabled', !ready || busy || !hasScript || (running && !liveRun.paused));
   safeSet('#play', 'textContent', busy ? '准备中…' : running && liveRun.paused ? '继续播报' : '开始播报');
   safeSet('#pause', 'disabled', !running || liveRun.paused);
   safeSet('#stop', 'disabled', !liveRun && !busy);
   safeSet('#stopPreview', 'disabled', !liveRun && !busy);
   safeSet('#revise', 'disabled', busy || Boolean(revisionPending) || !hasScript);
-  safeSet('#speakAnswer', 'disabled', !currentAnswer || Boolean(questionRequest) || busy);
-  safeSet('#previewVoice', 'disabled', busy);
+  safeSet('#speakAnswer', 'disabled', !ready || !currentAnswer || Boolean(questionRequest) || busy);
+  safeSet('#previewVoice', 'disabled', !ready || busy);
+}
+
+function playbackReady() {
+  if (!selectedVoiceWantsGpt()) return true;
+  return Boolean(!voicePrimeInFlight && ttsStatus?.ready &&
+    ttsStatus?.provider === 'gpt-sovits' && ttsStatus?.live_path_warmed === true);
+}
+
+function startTtsReadinessPolling() {
+  clearTimeout(ttsReadinessTimer);
+  const loadingId = activeViewLoading;
+  const tick = async () => {
+    if (loadingId !== activeViewLoading) return;
+    await syncTtsMode();
+    if (loadingId !== activeViewLoading) return;
+    updatePlaybackControls();
+    ttsReadinessTimer = setTimeout(tick, playbackReady() ? 2500 : 800);
+  };
+  updatePlaybackControls();
+  void tick();
 }
 
 function clearAnswer() {
@@ -510,6 +536,8 @@ function clearAnswer() {
 }
 
 function stopCurrentView() {
+  clearTimeout(ttsReadinessTimer); ttsReadinessTimer = null;
+  voicePrimeToken++; voicePrimeInFlight = false;
   saveStudioDraft();
   activeViewLoading = null;
   clearAnswer();
@@ -745,7 +773,30 @@ function selectedVoiceWantsGpt() {
   return option.dataset.provider === 'gpt-sovits' || option.dataset.cloned === '1' || option.value !== 'browser-default';
 }
 
+function coverageScript() {
+  const current = document.querySelector('#script');
+  if (current) return current.value;
+  try { return JSON.parse(sessionStorage.getItem('carLiveStudioDraft') || '{}').script || session?.script || ''; }
+  catch { return session?.script || ''; }
+}
+
+function coverageMessage(script, prompt) {
+  const missing = VoiceLibrary.missingCoverage(script, prompt, normalizeSpeechText);
+  return missing.length ? `参考原文未覆盖：${missing.join('、')}。请重点试听这些数字、单位和缩写；缺失不等于一定读错。` : '';
+}
+
+function renderReferenceCoverage() {
+  const select = document.querySelector('#voice');
+  if (!select) return;
+  let node = document.querySelector('#referenceCoverage');
+  if (!node) { node = document.createElement('small'); node.id = 'referenceCoverage'; node.className = 'hint'; select.parentElement.appendChild(node); }
+  node.textContent = voiceReferencePrompts.has(select.value)
+    ? coverageMessage(coverageScript(), voiceReferencePrompts.get(select.value)) : '';
+  node.hidden = !node.textContent;
+}
+
 function initializeVoicePicker(voices) {
+  voiceReferencePrompts = new Map(voices.filter(voice => voice.cloned).map(voice => [voice.id, voice.prompt_text || '']));
   const select = document.querySelector('#voice');
   // The 音色克隆 page has no picker of its own; it reuses the stored selection.
   const currentId = () => select ? select.value : storedVoiceId();
@@ -761,6 +812,7 @@ function initializeVoicePicker(voices) {
       card.querySelector('.voice-use').setAttribute('aria-pressed', String(selected));
     });
     ttsMode = selectedVoiceWantsGpt() ? 'gpt-sovits' : 'browser';
+    renderReferenceCoverage();
     return voiceId;
   };
   if (select) {
@@ -775,6 +827,7 @@ function initializeVoicePicker(voices) {
     };
   }
   refresh();
+  startTtsReadinessPolling();
   document.querySelectorAll('.voice-use, .voice-preview').forEach(button => {
     button.onclick = async () => {
       rememberVoiceId(button.dataset.id);
@@ -822,9 +875,9 @@ async function studio() {
     const first = dash.vehicles[0] || {brand:'欧拉',series:'欧拉5 EV',year:'2026'};
     layout('直播控制台', '导入或编写直播话术，边生成边播放；播报中改稿会在下一个自然停顿安全切换。', `
     <section class="panel live-settings-panel"><div class="panel-body fields studio-settings"><label>车型<select id="vehicle">${vehicleOptions(dash.vehicles)}</select></label><label>音色<select id="voice">${VoiceLibrary.options(voices, esc)}</select></label><label>语速 <output id="speedOut">1.00</output><input id="speed" type="range" min="0.7" max="1.4" value="1.00" step="0.01"></label><label>音量 <output id="volumeOut">100%</output><input id="volume" type="range" min="0" max="1" value="1" step="0.05"></label><label>语调 <output id="pitchOut">0</output><input id="pitch" type="range" min="-4" max="4" value="0" step="1"></label><span id="ttsMode">检查语音引擎…</span></div></section>
-    <details class="studio-preview"><summary>音色试听<span id="selectedVoiceName"></span></summary><div class="panel-body"><textarea id="voicePreviewText" class="question" aria-label="试听文案">大家好，欢迎来到汽车直播间，今天给大家介绍这款车型。</textarea><div class="controls"><button class="btn" id="previewVoice">试听</button><button class="btn secondary" id="stopPreview">停止</button></div></div></details>
-    <div class="studio"><section class="panel"><div class="panel-head"><h2>直播脚本</h2><span id="version"></span></div><div class="panel-body"><div class="inline-tools"><label class="btn secondary file-btn">导入脚本<input id="scriptFile" type="file" accept=".txt,.md" hidden></label><button class="btn secondary" id="generate">生成脚本</button></div><textarea id="script">老板，今天为大家介绍欧拉 5 EV 2026 款 580km 激光雷达版。它的 CLTC 纯电续航为 580 公里，轴距 2720 毫米，最大功率 150 千瓦。</textarea><p id="scriptUnits" class="script-units"></p><div class="controls"><button class="btn" id="play">开始播报</button><button class="btn secondary" id="pause">暂停</button><button class="btn secondary" id="stop">停止</button><button class="btn secondary" id="revise">应用改稿</button></div><p id="playstate">当前句 0 / 0 · 待机</p><p id="playunit" class="hint"></p></div></section>
-    <aside class="panel"><div class="panel-head"><h2>观众问答</h2></div><div class="panel-body"><textarea class="question" id="question">欧拉 5 EV 的续航是多少？</textarea><button class="btn" id="ask">检索回答</button><button class="btn secondary" id="speakAnswer">语音播报</button><div id="answer"></div></div></aside></div>`, {eyebrow:'核心模块 02', tag:'流式 TTS 与动态改稿'});
+    <details class="studio-preview"><summary>音色试听<span id="selectedVoiceName"></span></summary><div class="panel-body"><textarea id="voicePreviewText" class="question" aria-label="试听文案">大家好，欢迎来到汽车直播间，今天给大家介绍这款车型。</textarea><div class="controls"><button class="btn" id="previewVoice" disabled>试听</button><button class="btn secondary" id="stopPreview">停止</button></div></div></details>
+    <div class="studio"><section class="panel"><div class="panel-head"><h2>直播脚本</h2><span id="version"></span></div><div class="panel-body"><div class="inline-tools"><label class="btn secondary file-btn">导入脚本<input id="scriptFile" type="file" accept=".txt,.md" hidden></label><button class="btn secondary" id="generate">生成脚本</button></div><textarea id="script">老板，今天为大家介绍欧拉 5 EV 2026 款 580km 激光雷达版。它的 CLTC 纯电续航为 580 公里，轴距 2720 毫米，最大功率 150 千瓦。</textarea><p id="scriptUnits" class="script-units"></p><div class="controls"><button class="btn" id="play" disabled>开始播报</button><button class="btn secondary" id="pause">暂停</button><button class="btn secondary" id="stop">停止</button><button class="btn secondary" id="revise">应用改稿</button><span id="ttsLatency" style="margin-left:12px;color:#666;font-size:14px;"></span></div><p id="playstate">当前句 0 / 0 · 待机</p><p id="playunit" class="hint"></p></div></section>
+    <aside class="panel"><div class="panel-head"><h2>观众问答</h2></div><div class="panel-body"><textarea class="question" id="question">欧拉 5 EV 的续航是多少？</textarea><button class="btn" id="ask">检索回答</button><button class="btn secondary" id="speakAnswer" disabled>语音播报</button><div id="answer"></div></div></aside></div>`, {eyebrow:'核心模块 02', tag:'流式 TTS 与动态改稿'});
 
     // Check again before initializing
     if (activeViewLoading !== loadingId) {
@@ -855,14 +908,8 @@ async function studio() {
         if (input) input.oninput = () => updateOutputs();
       });
       updateOutputs();
-      const modeNode = $('#ttsMode');
-      if (modeNode) modeNode.textContent = ttsMode === 'gpt-sovits' ? `${tts.provider_label || '服务端 TTS'} · PCM 实时流式播报` : 'Web Speech API（回退模式）';
       initializeVoicePicker(voices);
-      if (modeNode) {
-        modeNode.textContent = ttsMode === 'gpt-sovits'
-          ? (tts?.warming_up ? `${tts.provider_label || '服务端 TTS'} · 正在预热` : `${tts.provider_label || '服务端 TTS'} · PCM 实时流式播报`)
-          : 'Web Speech API（回退模式）';
-      }
+      renderTtsMode();
       primeSelectedVoice();
       const vehicleSelect = $('#vehicle');
       if (dash.vehicles.length && vehicleSelect) vehicleSelect.value = [first.brand,first.series,first.year].join(' / ');
@@ -890,8 +937,8 @@ async function voices() {
   if (activeViewLoading !== loadingId) return;
   layout('音色克隆', '内置多套汽车主播音色可一键切换，也可上传或现场录制一段真人样本克隆专属主播。', `
     ${VoiceLibrary.cards(allVoices, esc)}
-    <section class="panel"><div class="panel-head"><h2>音色试听</h2><span id="selectedVoiceName"></span></div><div class="panel-body"><textarea id="voicePreviewText" class="question" aria-label="试听文案">大家好，欢迎来到汽车直播间，今天给大家介绍这款车型。</textarea><div class="controls"><button class="btn" id="previewVoice">试听</button><button class="btn secondary" id="stopPreview">停止</button></div><p id="playstate">空闲 · 未播报</p><p id="playunit" class="hint"></p></div></section>
-    <section class="panel panel-m3"><div class="panel-head"><h2>快速克隆音色</h2><span>上传或现场录制一段真人样本，检查通过即可用于流式播报</span></div><div class="panel-body clone-grid"><label>名称<input id="voiceName" value="我的主播"></label><label>风格<input id="voiceStyle" placeholder="低沉男声、温柔女声等"></label>${VoiceRecorder.markup()}<div class="clone-actions"><button class="btn secondary" id="analyzeVoice">检查样本</button><button class="btn" id="clone">创建音色</button><progress id="voiceProgress" max="100" value="0" hidden></progress><span id="cloneState"></span></div><div class="voice-list"><h3>已创建音色</h3>${allVoices.filter(v => v.cloned).map(v => { const quality = v.quality?.message || ''; const qualityLabel = v.quality?.status === 'ready' ? ' · 已优化' : v.quality?.status === 'invalid' ? ' · 格式异常' : v.quality?.status === 'needs-review' ? ' · 待优化' : ''; const warmLabel = v.calibrating ? ' · 校准中' : v.calibration_pending ? ' · 待校准' : v.warming ? ' · 预热中' : v.warmed ? ' · 就绪' : ''; const referenceLabel = v.reference_count > 1 ? ` · ${v.reference_count}条参考` : ''; const actionDisabled = v.quality?.status !== 'ready' || v.warming || v.synthesis_check?.status === 'pending' || v.synthesis_check?.status === 'failed' ? ' disabled' : ''; return `<div class="voice-row"><div><span>${esc(v.name)} · ${esc(v.style)}${referenceLabel}${qualityLabel}${warmLabel}</span>${v.cloned ? `${v.quality?.status === 'ready' ? '' : `<small class="hint">${esc(quality)}</small>`}<div class="voice-row-actions"><button class="btn secondary voice-use" data-id="${esc(v.id)}"${actionDisabled}>使用</button><button class="btn secondary voice-preview" data-id="${esc(v.id)}"${actionDisabled}>试听</button><input class="voice-prompt" data-id="${esc(v.id)}" value="${esc(v.prompt_text || '')}" placeholder="参考音频原文"><button class="btn secondary voice-save" data-id="${esc(v.id)}">保存</button></div>` : ''}</div>${v.cloned ? `<button class="btn secondary voice-delete" data-id="${esc(v.id)}">删除</button>` : ''}</div>`; }).join('')}</div></div></section>`, {eyebrow:'核心模块 03', tag:'拟人化语音克隆'});
+    <section class="panel"><div class="panel-head"><h2>音色试听</h2><span id="selectedVoiceName"></span></div><div class="panel-body"><textarea id="voicePreviewText" class="question" aria-label="试听文案">大家好，欢迎来到汽车直播间，今天给大家介绍这款车型。</textarea><div class="controls"><button class="btn" id="previewVoice" disabled>试听</button><button class="btn secondary" id="stopPreview">停止</button></div><p id="playstate">空闲 · 未播报</p><p id="playunit" class="hint"></p></div></section>
+    <section class="panel panel-m3"><div class="panel-head"><h2>快速克隆音色</h2><span>上传或现场录制一段真人样本，检查通过即可用于流式播报</span></div><div class="panel-body clone-grid"><label>名称<input id="voiceName" value="我的主播"></label><label>风格<input id="voiceStyle" placeholder="低沉男声、温柔女声等"></label>${VoiceRecorder.markup()}<div class="clone-actions"><button class="btn secondary" id="analyzeVoice">检查样本</button><button class="btn" id="clone">创建音色</button><progress id="voiceProgress" max="100" value="0" hidden></progress><span id="cloneState"></span></div><div class="voice-list"><h3>已创建音色</h3>${allVoices.filter(v => v.cloned).map(v => { const quality = (v.quality?.message || '') + referenceLevelMessage(v.quality); const qualityLabel = v.quality?.status === 'ready' ? ' · 样本格式通过' : v.quality?.status === 'invalid' ? ' · 格式异常' : v.quality?.status === 'needs-review' ? ' · 待优化' : ''; const warmLabel = v.calibrating ? ' · 校准中' : v.calibration_pending ? ' · 待校准' : v.warming ? ' · 预热中' : v.warmed ? ' · 就绪' : ''; const referenceLabel = v.reference_count > 1 ? ` · ${v.reference_count}条参考` : ''; const actionDisabled = v.quality?.status !== 'ready' || v.warming || v.synthesis_check?.status === 'pending' || v.synthesis_check?.status === 'failed' ? ' disabled' : ''; return `<div class="voice-row"><div><span>${esc(v.name)} · ${esc(v.style)}${referenceLabel}${qualityLabel}${warmLabel}</span>${v.cloned ? `<small class="hint">${esc(quality)}</small><div class="voice-row-actions"><button class="btn secondary voice-use" data-id="${esc(v.id)}"${actionDisabled}>使用</button><button class="btn secondary voice-preview" data-id="${esc(v.id)}"${actionDisabled}>试听</button><input class="voice-prompt" data-id="${esc(v.id)}" value="${esc(v.prompt_text || '')}" placeholder="参考音频原文"><button class="btn secondary voice-save" data-id="${esc(v.id)}">保存</button></div>` : ''}</div>${v.cloned ? `<button class="btn secondary voice-delete" data-id="${esc(v.id)}">删除</button>` : ''}</div>`; }).join('')}</div></div></section>`, {eyebrow:'核心模块 03', tag:'拟人化语音克隆'});
   voiceRecorder = VoiceRecorder.mount(document.querySelector('#cloneCapture'), {
     beforeRecord: () => { stopLive(); speechSynthesis.cancel(); },
     onBusy: busy => {
@@ -932,6 +979,45 @@ async function voices() {
     } catch (error) { button.disabled = false; alert(error.message); }
   });
   document.querySelectorAll('.voice-save').forEach(button => {
+    const voice = allVoices.find(item => item.id === button.dataset.id);
+    const calibrate = document.createElement('button');
+    calibrate.className = 'btn secondary voice-calibrate';
+    calibrate.textContent = voice?.calibrating ? '校准中…' : voice?.calibration_pending ? '校准已排队' : '重新校准';
+    calibrate.disabled = Boolean(voice?.calibrating || voice?.calibration_pending || voice?.adaptation);
+    calibrate.title = voice?.calibration_message || '空闲时筛选候选，保存音色参数';
+    calibrate.onclick = async () => {
+      calibrate.disabled = true;
+      try {
+        const result = await api('/voices/' + button.dataset.id + '/calibrate', {method:'POST'});
+        calibrate.textContent = result.status === 'running' ? '校准中…' : '校准已排队';
+        apiCache.invalidate('/voices');
+      } catch (error) { calibrate.disabled = false; alert(error.message); }
+    };
+    button.parentElement.appendChild(calibrate);
+    const status = document.createElement('small');
+    status.className = 'hint';
+    status.textContent = voice?.prosody_advice || '';
+    status.title = voice?.calibration_message || '';
+    button.parentElement.appendChild(status);
+    const coverage = document.createElement('small');
+    coverage.className = 'hint reference-coverage';
+    coverage.textContent = coverageMessage(coverageScript(), voice?.prompt_text || '');
+    coverage.hidden = !coverage.textContent;
+    button.parentElement.appendChild(coverage);
+    const policyLabel = document.createElement('label');
+    const policy = document.createElement('input');
+    policy.type = 'checkbox'; policy.checked = voice?.prompt_policy === 'checked';
+    policy.onchange = async () => {
+      policy.disabled = true;
+      try {
+        await api('/voices/' + button.dataset.id, {method:'PATCH', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({prompt_policy:policy.checked ? 'checked' : 'off'})});
+        apiCache.invalidate('/voices');
+      } catch (error) { policy.checked = !policy.checked; alert(error.message); }
+      finally { policy.disabled = false; }
+    };
+    policyLabel.append(policy, '参考语气优先（逐句检查，可能增加等待）');
+    button.parentElement.appendChild(policyLabel);
     const optimize = document.createElement('button');
     optimize.className = 'btn secondary voice-optimize';
     optimize.textContent = '优化参考音频';
@@ -943,6 +1029,42 @@ async function voices() {
       catch (error) { optimize.disabled = false; optimize.textContent = '优化失败'; alert(error.message); }
     };
     button.parentElement.appendChild(optimize);
+    const adaptation = voice?.adaptation;
+    const adapting = ['queued', 'running', 'validating'].includes(adaptation?.status);
+    const adapt = document.createElement('button');
+    adapt.className = 'btn secondary voice-adapt';
+    adapt.textContent = adapting ? '专属音色处理中…' : adaptation?.status === 'failed' ? '重试专属训练' : '生成专属音色';
+    adapt.disabled = adapting;
+    adapt.onclick = async () => {
+      adapt.disabled = true;
+      try {
+        await api('/voices/' + button.dataset.id + '/adapt', {method:'POST'});
+        apiCache.invalidate('/voices');
+        await waitForVoiceWarmup(button.dataset.id);
+        if (currentView === 'voices') await voices();
+      } catch (error) { adapt.disabled = false; alert(error.message); }
+    };
+    button.parentElement.appendChild(adapt);
+    if (adaptation) {
+      const detail = document.createElement('small');
+      detail.className = 'hint';
+      detail.textContent = adaptation.message;
+      button.parentElement.appendChild(detail);
+      const rollback = document.createElement('button');
+      rollback.className = 'btn secondary voice-adapt-rollback';
+      rollback.textContent = '恢复训练前版本';
+      rollback.disabled = adapting || adaptation.status === 'rolled_back';
+      rollback.onclick = async () => {
+        rollback.disabled = true;
+        try {
+          await api('/voices/' + button.dataset.id + '/adapt/rollback', {method:'POST'});
+          apiCache.invalidate('/voices');
+          await waitForVoiceWarmup(button.dataset.id);
+          if (currentView === 'voices') await voices();
+        } catch (error) { rollback.disabled = false; alert(error.message); }
+      };
+      button.parentElement.appendChild(rollback);
+    }
   });
   updatePromptMeta();
   inspectVoiceFile();
@@ -993,10 +1115,10 @@ async function avatar() {
           <div class="fields studio-settings avatar-settings"><label>车型<select id="vehicle">${vehicleOptions(dash.vehicles)}</select></label><label>音色<select id="voice">${voiceOptions}</select></label><label>语速 <output id="speedOut">1.00</output><input id="speed" type="range" min="0.7" max="1.4" value="1.00" step="0.01"></label><label>音量 <output id="volumeOut">100%</output><input id="volume" type="range" min="0" max="1" value="1" step="0.05"></label><label>语调 <output id="pitchOut">0</output><input id="pitch" type="range" min="-4" max="4" value="0" step="1"></label></div>
           <div class="inline-tools"><label class="btn secondary file-btn">导入脚本<input id="scriptFile" type="file" accept=".txt,.md" hidden></label><button class="btn secondary" id="generate">生成脚本</button></div>
           <textarea id="script" class="avatar-script">老板，今天为大家介绍欧拉 5 EV 2026 款 580km 激光雷达版。它的 CLTC 纯电续航为 580 公里，轴距 2720 毫米，最大功率 150 千瓦。</textarea><p id="scriptUnits" class="script-units"></p>
-          <div class="controls"><button class="btn" id="play">开始播报</button><button class="btn secondary" id="pause">暂停</button><button class="btn secondary" id="stop">停止</button><button class="btn secondary" id="revise">应用改稿</button></div>
+          <div class="controls"><button class="btn" id="play" disabled>开始播报</button><button class="btn secondary" id="pause">暂停</button><button class="btn secondary" id="stop">停止</button><button class="btn secondary" id="revise">应用改稿</button><span id="ttsLatency" role="status" style="margin-left:12px;color:#666;font-size:14px;"></span></div>
           <p id="playstate">当前句 0 / 0 · 待机</p><p id="playunit" class="hint"></p><p id="version" class="hint"></p>
         </div></section>
-        <section class="panel avatar-qa"><div class="panel-head"><h2>观众问答</h2><span>智能问答</span></div><div class="panel-body"><textarea class="question" id="question">欧拉 5 EV 的续航是多少？</textarea><div class="controls"><button class="btn" id="ask">检索</button><button class="btn secondary" id="speakAnswer">播报</button></div><div id="answer"></div></div></section>
+        <section class="panel avatar-qa"><div class="panel-head"><h2>观众问答</h2><span>智能问答</span></div><div class="panel-body"><textarea class="question" id="question">欧拉 5 EV 的续航是多少？</textarea><div class="controls"><button class="btn" id="ask">检索</button><button class="btn secondary" id="speakAnswer" disabled>播报</button></div><div id="answer"></div></div></section>
       </section>
     </div>`, {eyebrow:'扩展能力', tag:'Live2D 数字主播'});
 
@@ -1014,6 +1136,7 @@ async function avatar() {
       const vehicleSelect = $('#vehicle');
       if (dash.vehicles.length && vehicleSelect) vehicleSelect.value = [first.brand, first.series, first.year].join(' / ');
       initializeVoicePicker(voices);
+      renderTtsMode();
       safeClick('#play', play);
       safeClick('#pause', pause);
       safeClick('#stop', stop);
@@ -1055,7 +1178,10 @@ function primeSelectedVoice() {
 
 async function primeVoice(voiceId) {
   if (!voiceId || ttsMode !== 'gpt-sovits') return;
+  const token = ++voicePrimeToken;
+  voicePrimeInFlight = true; updatePlaybackControls();
   try { await api('/voices/' + encodeURIComponent(voiceId) + '/prime', {method:'POST'}); } catch {}
+  finally { if (token === voicePrimeToken) { voicePrimeInFlight = false; updatePlaybackControls(); } }
 }
 
 function updateOutputs() {
@@ -1065,12 +1191,8 @@ function updateOutputs() {
   const temperature = $('#temperature');
   const repetition = $('#repetition');
   if (!speed) return;
-  // IndexTTS-2.0 has no duration_factor, so the backend accepts and drops the
-  // speed request. Say so instead of letting the slider look functional.
   const speedText = Number(speed.value).toFixed(2);
-  safeSet('#speedOut', 'textContent', ttsStatus?.speed_control === false
-    ? `${speedText}（当前语音模型不支持）`
-    : speedText);
+  safeSet('#speedOut', 'textContent', speedText);
   if (volume) safeSet('#volumeOut', 'textContent', Math.round(Number(volume.value) * 100) + '%');
   if (volume && gainNode && audioCtx) gainNode.gain.setTargetAtTime(Number(volume.value), audioCtx.currentTime, 0.015);
   if (pitch) safeSet('#pitchOut', 'textContent', (Number(pitch.value) > 0 ? '+' : '') + pitch.value);
@@ -1106,6 +1228,11 @@ const STREAM_LEAD_SECONDS = 0.08;
 // One upstream semantic session covers a few visible phrases. This keeps
 // first audio responsive while avoiding a model/frontend reset at every comma.
 const STREAM_BATCH_UNITS = 5;
+// The first request is intentionally smaller. GPT-SoVITS must tokenize and
+// prepare the whole upstream text before its first semantic chunk, so sending
+// five phrases here makes a long script pay the latency of all five phrases
+// before playback can begin. Later batches retain the larger context window.
+const STREAM_FIRST_BATCH_UNITS = 1;
 // Independently synthesized phrases can start/end at a non-zero waveform
 // sample. A short overlap with gain ramps removes the resulting click without
 // inserting a silence dip between live units.
@@ -1119,7 +1246,10 @@ function stopSources(run) {
   stopSource();
 }
 
-function stopLive({suspend = false} = {}) {
+function stopLive({suspend = false, clearTimer = true} = {}) {
+  if (clearTimer) {
+    stopLatencyTimer(); // Stop timer when playback stops
+  }
   lipSync.clear();
   const run = liveRun;
   window.CarLiveFeatures?.flushPlayback();
@@ -1135,6 +1265,61 @@ function stopLive({suspend = false} = {}) {
 }
 
 function stopGpt() { stop(); }
+
+// TTS latency timer functions
+function startLatencyTimer() {
+  stopLatencyTimer();
+  ttsLatencyStartTime = audioRequestedAt || performance.now();
+  const latencyDisplay = document.querySelector('#ttsLatency');
+  if (!latencyDisplay) return;
+
+  // Show initial value immediately
+  latencyDisplay.textContent = '⏱️ 0.0s';
+  latencyDisplay.style.color = '#3498db';
+
+  ttsLatencyTimer = setInterval(() => {
+    const elapsed = (performance.now() - ttsLatencyStartTime) / 1000;
+    latencyDisplay.textContent = `⏱️ ${elapsed.toFixed(1)}s`;
+    latencyDisplay.style.color = elapsed > 2 ? '#e67e22' : '#3498db';
+  }, 100); // Update every 100ms
+}
+
+function stopLatencyTimer(finalTime) {
+  if (ttsLatencyTimer) {
+    clearInterval(ttsLatencyTimer);
+    ttsLatencyTimer = null;
+  }
+  ttsLatencyStartTime = 0;
+
+  const latencyDisplay = document.querySelector('#ttsLatency');
+  if (!latencyDisplay) return;
+
+  if (finalTime !== undefined) {
+    const elapsed = (finalTime / 1000).toFixed(2);
+    latencyDisplay.textContent = `✓ 首音频 ${elapsed}s`;
+    latencyDisplay.style.color = finalTime < 2000 ? '#27ae60' : finalTime < 3000 ? '#3498db' : '#e67e22';
+  } else {
+    latencyDisplay.textContent = '';
+  }
+}
+
+// One click-to-output measurement feeds both the page timer and analytics.
+// Includes readiness polling, session creation, PCM arrival and output buffering.
+function firstAudioLatency(run, when) {
+  return Math.max(0, performance.now() - run.requestedAt +
+    (Math.max(0, when - audioCtx.currentTime) + (audioCtx.baseLatency || 0) + (audioCtx.outputLatency || 0)) * 1000);
+}
+
+function firstSpeechOffset(buffer) {
+  const samples=buffer.getChannelData(0), windowSize=Math.max(1,Math.round(buffer.sampleRate*.01));
+  for(let start=0;start<samples.length;start+=windowSize){
+    const end=Math.min(samples.length,start+windowSize);
+    let energy=0;
+    for(let index=start;index<end;index++)energy+=samples[index]*samples[index];
+    if(Math.sqrt(energy/(end-start))>=Math.pow(10,-42/20))return start/buffer.sampleRate;
+  }
+  return null;
+}
 
 async function ensureAudio() {
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -1172,8 +1357,17 @@ function sharedPrefixLength(before, after) {
 
 function finishRunIfDrained(run) {
   if (run.stopped || run.failed || liveRun !== run || run.inFlight || run.pendingRestartAt !== null || run.sources.size || run.nextIndex < run.q.length) return;
+  if (run.mode === 'gpt-sovits' && !Number.isFinite(run.firstAudioLatencyMs)) {
+    run.failed = true;
+    saveLiveState('stopped', run.currentIndex);
+    stopLatencyTimer();
+    liveRun = null;
+    setState('播报失败：未检测到有效人声，请检查音色参考与合成参数');
+    return;
+  }
   saveLiveState('completed', run.q.length);
   window.CarLiveFeatures?.flushPlayback();
+  if (ttsLatencyTimer) stopLatencyTimer();
   liveRun = null;
   setState(`播报完成 · 共 ${run.q.length} 句`);
 }
@@ -1199,6 +1393,9 @@ function parseWavHeader(bytes) {
     const name = readFourCC(bytes, offset);
     const size = view.getUint32(offset + 4, true);
     const body = offset + 8;
+    // A streaming data chunk may declare an open-ended length. Its header is
+    // enough to start scheduling PCM; waiting for that length stalls playback.
+    if (name === 'data') return format ? {...format, dataOffset:body} : null;
     if (body + size > bytes.length) return null;
     if (name === 'fmt ') {
       if (size < 16) throw new Error('WAV 音频格式无效');
@@ -1207,7 +1404,6 @@ function parseWavHeader(bytes) {
         sampleRate:view.getUint32(body + 4, true), bitsPerSample:view.getUint16(body + 14, true),
       };
     }
-    if (name === 'data') return format ? {...format, dataOffset:body} : null;
     offset = body + size + (size % 2);
   }
   return null;
@@ -1276,6 +1472,14 @@ function schedulePcm(run, bytes, unitIndex, unitEnd = unitIndex + 1) {
       run.lastScheduledSource = source;
       source.onended = () => { run.sources.delete(source); sourceGain.disconnect(); if (activeSource === source) activeSource = null; finishRunIfDrained(run); };
       source.start(when);
+      if (run.firstAudioLatencyMs == null) {
+        const onset=firstSpeechOffset(buffer);
+        if (onset !== null) {
+          run.firstAudioLatencyMs=firstAudioLatency(run,when+onset/playbackRate);
+          if (ttsLatencyStartTime > 0) stopLatencyTimer(run.firstAudioLatencyMs);
+          console.info('first_audio_measurement',JSON.stringify({mode:run.mode,latency_ms:run.firstAudioLatencyMs,requested_at_ms:run.requestedAt,scheduled_at_ms:performance.now(),speech_offset_s:onset}));
+        }
+      }
       window.CarLiveFeatures?.audioScheduled(run,source,when);
     }
   };
@@ -1343,7 +1547,10 @@ async function streamGptUnit(run) {
   if (run.stopped || liveRun !== run || run.paused || run.inFlight) return;
   if (run.nextIndex >= run.q.length) { finishRunIfDrained(run); return; }
   const index = run.nextIndex;
-  const batchEnd = Math.min(run.q.length, index + STREAM_BATCH_UNITS);
+  const batchSize = index === run.currentBatchStart && index === 0
+    ? STREAM_FIRST_BATCH_UNITS
+    : STREAM_BATCH_UNITS;
+  const batchEnd = Math.min(run.q.length, index + batchSize);
   const batchText = run.q.slice(index, batchEnd).join('');
   run.nextIndex = batchEnd;
   run.currentBatchStart = index;
@@ -1391,6 +1598,7 @@ async function streamGptUnit(run) {
       run.nextIndex = Math.min(run.nextIndex, run.q.length);
       run.pendingRestartAt = null;
       console.error(error);
+      if (liveRun === run) stopLatencyTimer();
       setState(`${serverTtsLabel()} 流式请求失败：` + error.message);
     }
   } finally {
@@ -1413,11 +1621,11 @@ async function streamGptUnit(run) {
 }
 
 async function startGptRun(q, startIndex = 0) {
-  stopLive();
+  stopLive({ clearTimer: false }); // Don't clear timer when starting new playback
   const run = createLiveRun('gpt-sovits', q, startIndex);
   run.requestedAt=audioRequestedAt || performance.now();
   liveRun = run;
-  try { await ensureAudio(); } catch (error) { liveRun = null; setState('浏览器不支持音频播放：' + error.message); return; }
+  try { await ensureAudio(); } catch (error) { liveRun = null; stopLatencyTimer(); setState('浏览器不支持音频播放：' + error.message); return; }
   if (!run.stopped) void streamGptUnit(run);
 }
 
@@ -1429,11 +1637,17 @@ function speakBrowserUnit(run) {
   const utterance = new SpeechSynthesisUtterance(run.q[index]);
   utterance.lang = 'zh-CN'; utterance.rate = Number(document.querySelector('#speed')?.value || 1); utterance.volume = Number(document.querySelector('#volume')?.value || 1);
   utterance.pitch = Math.pow(2, Number(document.querySelector('#pitch')?.value || 0) / 12);
-  utterance.onstart = () => { setState(`浏览器语音播报 · 第 ${index + 1} / ${run.q.length} 句`, run.q[index]); saveLiveState('playing', index); };
+  utterance.onstart = () => {
+    if (run.stopped || liveRun !== run) return;
+    if (!run.hasScheduledAudio) stopLatencyTimer(performance.now() - run.requestedAt);
+    run.hasScheduledAudio = true;
+    setState(`浏览器语音播报 · 第 ${index + 1} / ${run.q.length} 句`, run.q[index]); saveLiveState('playing', index);
+  };
   utterance.onend = () => { if (!run.stopped) speakBrowserUnit(run); };
   utterance.onerror = event => {
     if (!run.stopped && event.error !== 'canceled') {
       run.failed = true;
+      stopLatencyTimer();
       setState('浏览器语音播放失败：' + event.error);
     }
   };
@@ -1445,8 +1659,9 @@ function startBrowserRun(q, startIndex = 0) {
     setState(`当前选择的是克隆音色，${serverTtsLabel()} 暂不可用，未切换为网页机械音`);
     return;
   }
-  stopLive(); speechSynthesis.cancel();
+  stopLive({ clearTimer: false }); speechSynthesis.cancel(); // Don't clear timer when starting new playback
   const run = createLiveRun('browser', q, startIndex);
+  run.requestedAt = audioRequestedAt || performance.now();
   liveRun = run; speakBrowserUnit(run);
 }
 
@@ -1472,35 +1687,41 @@ async function syncTtsMode() {
     // `provider: browser` is also returned while GPT-SoVITS is warming or
     // briefly restarting. Keep the clone route in that state and let the
     // play action wait/retry instead of silently speaking with Web Speech.
-    ttsMode = wantsGpt && status.provider !== 'browser' && (status.configured !== false || status.provider === 'idextts2')
-      ? 'gpt-sovits'
-      : 'browser';
+    ttsMode = wantsGpt ? 'gpt-sovits' : 'browser';
   } catch {
     if (activeViewLoading !== loadingId || intent !== audioIntent) return ttsMode;
     ttsStatus = null;
     ttsMode = wantsGpt ? 'gpt-sovits' : 'browser';
   }
-  const modeNode = document.querySelector('#ttsMode');
-  if (modeNode) {
-    modeNode.textContent = ttsMode === 'gpt-sovits'
-      ? (ttsStatus?.warming_up || ttsStatus?.reachable === false ? `${ttsStatus?.provider_label || '服务端 TTS'} · 正在连接/预热` : `${ttsStatus?.provider_label || '服务端 TTS'} · PCM 实时流式播报`)
-      : 'Web Speech API（回退模式）';
-  }
+  renderTtsMode();
+  updatePlaybackControls();
   return ttsMode;
 }
 
-async function waitForGptReady(maxAttempts = 120) {
+function renderTtsMode() {
+  const modeNode = document.querySelector('#ttsMode');
+  if (modeNode) {
+    modeNode.textContent = ttsMode === 'gpt-sovits'
+      ? (!playbackReady() ? `${ttsStatus?.provider_label || '服务端 TTS'} · 正在准备，完成后可播报` : `${ttsStatus?.provider_label || '服务端 TTS'} · 实时播报已就绪`)
+      : 'Web Speech API（回退模式）';
+  }
+}
+
+async function waitForGptReady(maxAttempts = 1) {
   const intent = audioIntent;
+  const waitingSince = performance.now();
   if (!selectedVoiceWantsGpt()) return false;
-  if(ttsStatus?.ready && performance.now()-ttsCheckedAt < 2000)return true;
+  if(playbackReady() && performance.now()-ttsCheckedAt < 2000)return true;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     if (intent !== audioIntent) return false;
     await syncTtsMode();
     if (intent !== audioIntent) return false;
-    if (ttsStatus?.provider !== 'browser' && ttsStatus?.ready) return true;
+    if (ttsStatus?.provider !== 'browser' && playbackReady()) return true;
     if (ttsStatus?.configured === false) return false;
     if (attempt + 1 < maxAttempts) {
-      setState(`正在等待 ${serverTtsLabel()} 就绪（${attempt + 1}/${maxAttempts}）`);
+      setState(ttsStatus?.live_path_warmed === false
+        ? `正在预热实时播报，完成后自动开始（已等待 ${Math.floor((performance.now() - waitingSince) / 1000)} 秒）`
+        : `正在等待 ${serverTtsLabel()} 就绪（${attempt + 1}/${maxAttempts}）`);
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
   }
@@ -1508,6 +1729,7 @@ async function waitForGptReady(maxAttempts = 120) {
 }
 
 async function play() {
+  if (!playbackReady()) return setState('语音服务正在准备，播报按钮将在就绪后自动开放');
   if (playPending || (liveRun && !liveRun.paused && !liveRun.failed)) return;
   const scriptInput = $('#script');
   const scriptText = scriptInput?.value || '';
@@ -1517,15 +1739,19 @@ async function play() {
   playPending = intent;
   updatePlaybackControls();
   audioRequestedAt=performance.now();
+
+  // Start latency timer
+  startLatencyTimer();
+
   try {
-    if (liveRun?.paused) { await resumeLive(liveRun); return; }
+    if (liveRun?.paused) { stopLatencyTimer(); await resumeLive(liveRun); return; }
     if (selectedVoiceWantsGpt()) {
       // Unlock audio while the original click still grants autoplay permission.
       await ensureAudio();
       if (intent !== audioIntent) return;
       const ready = await waitForGptReady();
       if (intent !== audioIntent) return;
-      if (!ready) return setState(`${serverTtsLabel()} 暂不可用，请检查语音服务后重试`);
+      if (!ready) { stopLatencyTimer(); return setState(`${serverTtsLabel()} 暂不可用，请检查语音服务后重试`); }
       ttsMode = 'gpt-sovits';
     } else {
       ttsMode = 'browser';
@@ -1541,6 +1767,7 @@ async function play() {
     }
     if (ttsMode === 'gpt-sovits') await startGptRun(q); else startBrowserRun(q);
   } catch (error) {
+    if (intent === audioIntent) stopLatencyTimer();
     if (intent === audioIntent && error.name !== 'AbortError') setState('无法开始播报：' + error.message);
   } finally {
     if (playPending === intent) { playPending = 0; updatePlaybackControls(); }
@@ -1723,25 +1950,29 @@ async function ask() {
 }
 
 async function speakText(text) {
+  if (!playbackReady()) return setState('语音服务正在准备，播报按钮将在就绪后自动开放');
   if (playPending) return;
   const q = sentenceList(normalizeSpeechText(text));
   if (!q.length) return;
   const intent=++audioIntent;
   playPending = intent;
   updatePlaybackControls();
+  stopLive();
   audioRequestedAt=performance.now();
+  startLatencyTimer();
   try {
     if (selectedVoiceWantsGpt()) {
       await ensureAudio();
       if (intent !== audioIntent) return;
       const ready = await waitForGptReady();
       if (intent !== audioIntent) return;
-      if (!ready) return setState(`${serverTtsLabel()} 暂不可用，请检查语音服务后重试`);
+      if (!ready) { stopLatencyTimer(); return setState(`${serverTtsLabel()} 暂不可用，请检查语音服务后重试`); }
       await startGptRun(q);
     } else if (intent === audioIntent) {
       startBrowserRun(q);
     }
   } catch (error) {
+    if (intent === audioIntent) stopLatencyTimer();
     if (intent === audioIntent && error.name !== 'AbortError') setState('播报失败：' + error.message);
   } finally {
     if (playPending === intent) { playPending = 0; updatePlaybackControls(); }
@@ -1977,13 +2208,25 @@ function inspectAuxFiles() {
   const node = document.querySelector('#voiceAuxMeta');
   if (!input || !node) return;
   const files = [...(input.files || [])];
+  for (let index = 0; index < 2; index += 1) {
+    const row = document.querySelector('#voiceAuxPromptRow' + index);
+    const prompt = document.querySelector('#voiceAuxPrompt' + index);
+    const label = document.querySelector('#voiceAuxPromptLabel' + index);
+    if (!row || !prompt) continue;
+    const file = files[index];
+    const key = file ? `${file.name}:${file.size}:${file.lastModified}` : '';
+    if (prompt.dataset.fileKey !== key) prompt.value = '';
+    prompt.dataset.fileKey = key;
+    row.hidden = !file;
+    if (label && file) label.textContent = `辅助录音 ${index + 1} 原文 · ${file.name}`;
+  }
   if (!files.length) {
-    node.textContent = '最多 2 条；同一说话人的不同句子，不需要填写文字';
+    node.textContent = '最多 2 条；填写对应原文后参与专属训练，留空仅作参考';
     node.classList.remove('warning');
     return;
   }
   const warning = files.length > 2;
-  node.textContent = `${files.length} 条辅助参考${warning ? ' · 最多只能使用 2 条' : ' · 将用于同一说话人的音色融合'}`;
+  node.textContent = `${files.length} 条辅助参考${warning ? ' · 最多只能使用 2 条' : ' · 请在下方填写各自原文；未填写的录音不参与专属训练'}`;
   node.classList.toggle('warning', warning);
 }
 
@@ -1993,7 +2236,14 @@ function cloneUpload(form, onProgress) {
     request.open('POST', API + '/voices/clone');
     request.responseType = 'json';
     request.upload.onprogress = event => { if (event.lengthComputable) onProgress(Math.round(event.loaded / event.total * 100)); };
-    request.onerror = () => reject(new Error('无法连接后端服务，请确认项目已启动'));
+    request.onerror = () => {
+      // A server-side 5xx response can arrive without a JSON body in older
+      // browsers. Only call it a connection failure when no HTTP response was
+      // received; otherwise show the real status so the operator can fix the
+      // audio/configuration issue instead of retrying a healthy backend.
+      if (request.status) reject(new Error(`音色克隆失败（HTTP ${request.status}）`));
+      else reject(new Error('无法连接后端服务，请确认项目已启动'));
+    };
     request.onload = () => {
       const body = request.response || {};
       if (request.status >= 200 && request.status < 300) return resolve(body);
@@ -2001,6 +2251,12 @@ function cloneUpload(form, onProgress) {
     };
     request.send(form);
   });
+}
+
+function referenceLevelMessage(quality) {
+  const levels=quality?.normalization;
+  if (!levels?.before || !levels?.after) return '';
+  return `；响度 RMS ${levels.before.rms_db} → ${levels.after.rms_db} dBFS，峰值 ${levels.before.peak_db} → ${levels.after.peak_db} dBFS`;
 }
 
 async function analyzeVoiceSample() {
@@ -2017,7 +2273,7 @@ async function analyzeVoiceSample() {
   try {
     const result = await api('/voices/analyze', {method:'POST', body:form});
     const advice = result.prompt_advice?.message ? `；${result.prompt_advice.message}` : '';
-    safeSet('#cloneState', 'textContent', `${result.quality?.message || result.recommendation}${advice}`);
+    safeSet('#cloneState', 'textContent', `${result.quality?.message || result.recommendation}${advice}${referenceLevelMessage(result.quality)}`);
     const stateNode = $('#cloneState');
     if (stateNode) {
       stateNode.classList.toggle('warning', result.status !== 'ready' || result.prompt_advice?.status === 'review');
@@ -2031,7 +2287,7 @@ async function analyzeVoiceSample() {
 
 async function waitForVoiceWarmup(voiceId) {
   const state = document.querySelector('#cloneState');
-  for (let attempt = 0; attempt < 180; attempt += 1) {
+  for (let attempt = 0; attempt < 360; attempt += 1) {
     try {
       const voices = await api('/voices');
       const voice = voices.find(item => item.id === voiceId);
@@ -2042,16 +2298,17 @@ async function waitForVoiceWarmup(voiceId) {
         }
         return false;
       }
-      if (voice && voice.warmed && !voice.warming) {
+      if (voice && voice.warmed && !voice.warming && voice.synthesis_check?.status === 'ready' &&
+          !['queued', 'running', 'validating'].includes(voice.adaptation?.status)) {
         if (state) {
-          state.textContent = voice.calibrating || voice.calibration_pending
+          state.textContent = voice.adaptation?.message || (voice.calibrating || voice.calibration_pending
             ? '音色已通过实际合成验收，可立即试听；后台继续优化音色'
-            : '音色已预热，可直接试听或用于直播';
+            : '音色已预热，可直接试听或用于直播');
           state.classList.remove('warning');
         }
         return true;
       }
-      if (state) state.textContent = `音色已创建，正在进行合成验收… ${attempt + 1} 秒`;
+      if (state) state.textContent = voice?.adaptation?.message || voice?.synthesis_check?.message || '音色已保存，正在等待实际合成验收…';
     } catch {}
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
@@ -2060,7 +2317,7 @@ async function waitForVoiceWarmup(voiceId) {
 }
 
 async function cloneVoice() {
-  const {file, auxiliary, prompt, duration, mode} = voiceRecorder.sample();
+  const {file, auxiliary, auxiliaryPrompts = [], prompt, duration, mode} = voiceRecorder.sample();
   const promptCore = prompt.replace(/[\s\p{P}\p{S}]+/gu, '');
   if (!file) {
     safeSet('#cloneState', 'textContent', mode === 'record' ? '请先录制并回听一段完整朗读。' : '请选择真人语音样本。');
@@ -2072,6 +2329,7 @@ async function cloneVoice() {
   const form = new FormData();
   form.append('sample', file);
   auxiliary.forEach(item => form.append('aux_samples', item));
+  auxiliaryPrompts.forEach(text => form.append('aux_prompt_texts', text));
   const voiceName = $('#voiceName');
   const voiceStyle = $('#voiceStyle');
   form.append('name', voiceName ? voiceName.value.trim() || '我的主播' : '我的主播');
@@ -2087,15 +2345,21 @@ async function cloneVoice() {
   try {
     const result = await cloneUpload(form, value => {
       if (progress) progress.value = value;
-      safeSet('#cloneState', 'textContent', value >= 100 ? '音频已上传，正在生成标准 PCM 并预热…' : `上传参考音频… ${value}%`);
+      safeSet('#cloneState', 'textContent', value >= 100 ? '音频已上传，正在检查样本并准备创建…' : `上传参考音频… ${value}%`);
     });
     localStorage.setItem('selectedVoiceId', result.id);
     apiCache.data.clear(); apiCache.timestamps.clear();
     if (currentView !== 'voices') return;
-    activateView('studio');
     safeSet('#cloneState', 'textContent', result.quality_hint || '音色已创建，正在预热…');
-    await waitForVoiceWarmup(result.id);
+    const accepted = await waitForVoiceWarmup(result.id);
     apiCache.data.clear(); apiCache.timestamps.clear();
+    if (currentView === 'voices') {
+      if (accepted) activateView('studio');
+      else {
+        await voices();
+        safeSet('#cloneState', 'textContent', '音色尚未就绪；请查看下方训练状态，可重试或恢复训练前版本。');
+      }
+    }
   } catch (error) {
     safeSet('#cloneState', 'textContent', error.message);
     if (stateNode) stateNode.classList.add('warning');

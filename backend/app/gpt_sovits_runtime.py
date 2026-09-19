@@ -73,6 +73,58 @@ def _copy_prompt(cache):
     return {key: list(value) if isinstance(value, list) else value for key, value in cache.items()}
 
 
+def _speaker_anchor_key(path, auxiliary_paths=None, threshold=.85):
+    return (_stamp(path), None if auxiliary_paths is None else tuple(_stamp(p) for p in auxiliary_paths), float(threshold))
+
+
+def _original_speaker_embedding(pipeline, path, auxiliary_paths=None, threshold=.85):
+    """Keep semantic/acoustic references intact while using an accepted voice anchor."""
+    if not getattr(pipeline, 'is_v2pro', False) or pipeline.sv_model is None:
+        raise ValueError('A separate speaker reference requires a v2Pro speaker encoder')
+    stamp = _speaker_anchor_key(path, auxiliary_paths, threshold)
+    cache = getattr(pipeline, '_speaker_anchor_cache', OrderedDict())
+    pipeline._speaker_anchor_cache = cache
+    if stamp not in cache:
+        import torch
+        previous = _copy_prompt(pipeline.prompt_cache)
+        try:
+            with torch.no_grad():
+                _, waveform = pipeline._get_ref_spec(path)
+                native = pipeline.sv_model.compute_embedding3(waveform).detach().clone()
+                if auxiliary_paths is None:
+                    cache[stamp] = native
+                else:
+                    # Use the scorer itself, including its speech-region crop,
+                    # CPU float32 model, screening, weights and normalization.
+                    # Decoder conditioning was trained on unnormalized vectors;
+                    # retain the native primary norm while sharing the exact
+                    # cosine target direction. A unit vector alone changes gain.
+                    from .voice_similarity import _load_model, _reference_target, reference_weights
+                    scoring = getattr(pipeline, '_speaker_target_scorer', None)
+                    if scoring is None:
+                        root = Path(inspect.getfile(type(pipeline.sv_model))).resolve().parents[1]
+                        scoring = _load_model(root, root/'GPT_SoVITS/pretrained_models/sv/pretrained_eres2netv2w24s4ep4.ckpt')
+                        pipeline._speaker_target_scorer = scoring
+                    paths = [Path(path), *map(Path, auxiliary_paths)]
+                    target, accepted, scores = _reference_target(paths, *scoring, threshold)
+                    scaled = target.to(device=native.device).reshape_as(native) * native.float().norm()
+                    cache[stamp] = scaled.to(dtype=native.dtype).detach().clone()
+                    pipeline._speaker_anchor_details = {'paths':list(map(str, paths)),
+                        'accepted_paths':list(map(str, accepted)), 'reference_scores':scores,
+                        'weights':reference_weights(scores, threshold), 'threshold':threshold,
+                        'native_primary_norm':float(native.float().norm()),
+                        'condition_norm':float(cache[stamp].float().norm()),
+                        'target_condition_cosine':float(torch.nn.functional.cosine_similarity(
+                            target.reshape(1,-1), cache[stamp].float().cpu().reshape(1,-1)).item())}
+        finally:
+            # _get_ref_spec also writes raw_audio/raw_sr. It must not replace
+            # the semantic prompt or acoustic conditioning for this request.
+            pipeline.prompt_cache = previous
+        while len(cache) > 8:
+            cache.popitem(last=False)
+    return cache[stamp]
+
+
 def install():
     from AR.models.t2s_model import Text2SemanticDecoder
     from GPT_SoVITS.TTS_infer_pack.TTS import TTS
@@ -90,6 +142,7 @@ def install_reference_cache(TTS, corrected_run):
 
         def invalidate(self, *args, _original=original, **kwargs):
             self._voice_cache = OrderedDict()
+            self._speaker_anchor_cache = OrderedDict()
             self._voice_cache_epoch = getattr(self, '_voice_cache_epoch', 0) + 1
             if hasattr(self, 'prompt_cache'):
                 self.prompt_cache['ref_audio_path'] = None
@@ -106,6 +159,8 @@ def install_reference_cache(TTS, corrected_run):
             _stamp(inputs.get('ref_audio_path')),
             tuple(_stamp(path) for path in (inputs.get('aux_ref_audio_paths') or []) if path),
             inputs.get('prompt_text') or '', inputs.get('prompt_lang'),
+            _speaker_anchor_key(inputs.get('speaker_ref_audio_path'), inputs.get('speaker_aux_ref_audio_paths'),
+                                inputs.get('speaker_similarity_threshold', .85)),
         )
         if key[0] and key in cache:
             self.prompt_cache = _copy_prompt(cache.pop(key))
@@ -113,10 +168,19 @@ def install_reference_cache(TTS, corrected_run):
         elif key[0]:
             self.prompt_cache['ref_audio_path'] = None
             self.prompt_cache['prompt_text'] = None
+        speaker_reference = inputs.get('speaker_ref_audio_path')
+        original_compute = None
+        if speaker_reference:
+            anchor = _original_speaker_embedding(self, speaker_reference, inputs.get('speaker_aux_ref_audio_paths'),
+                                                 inputs.get('speaker_similarity_threshold', .85))
+            original_compute = self.sv_model.compute_embedding3
+            self.sv_model.compute_embedding3 = lambda waveform: anchor.clone()
         self._in_live_run = True
         try:
             yield from corrected_run(self, inputs)
         finally:
+            if original_compute is not None:
+                self.sv_model.compute_embedding3 = original_compute
             self._in_live_run = False
             if (key[0] and epoch == getattr(self, '_voice_cache_epoch', 0)
                     and self.prompt_cache.get('ref_audio_path') == inputs.get('ref_audio_path')):

@@ -1,0 +1,48 @@
+graph TB
+    subgraph "交互层"
+        A[Web前端<br/>Vue.js 5173]
+        B[音频排程<br/>AudioContext]
+    end
+
+    subgraph "业务层"
+        C[FastAPI服务<br/>8000端口]
+        D[会话管理]
+        E[动态改稿引擎]
+        F[问答编排]
+    end
+
+    subgraph "数据层"
+        G[SQLite数据库<br/>文档/片段/版本/音色]
+        H[FAISS向量索引<br/>512维语义向量]
+        I[BM25词法索引<br/>中文双字词]
+    end
+
+    subgraph "模型层"
+        J[GPT-SoVITS<br/>9880端口]
+        K[BGE Embedding<br/>ONNX INT8]
+        L[BGE Reranker<br/>交叉编码器]
+    end
+
+    A --> C
+    B --> C
+    C --> D
+    C --> E
+    C --> F
+    D --> G
+    E --> J
+    F --> H
+    F --> I
+    F --> L
+    G --> H
+    J --> B
+    K --> H
+
+    style A fill:#E3F2FD
+    style B fill:#E3F2FD
+    style C fill:#BBDEFB
+    style J fill:#90CAF9
+    style K fill:#90CAF9
+    style L fill:#90CAF9
+    style G fill:#FFF9C4
+    style H fill:#FFF9C4
+    style I fill:#FFF9C4

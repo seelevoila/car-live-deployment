@@ -1,9 +1,10 @@
 import asyncio
 import io
 import json
+import logging
 import math
 import re
-import shutil
+import statistics
 import sqlite3
 import struct
 import subprocess
@@ -32,12 +33,12 @@ from .rag_answers import prepare_context, commercial_answer, applicable_warnings
 from .compliance import redact, sanitize_upload
 from . import llm_gateway
 from .local_answers import normalize_question, excerpt_answer
-from .tts_gpt_sovits import gpt_sovits_engine, delivery_text
+from .tts_gpt_sovits import gpt_sovits_engine, delivery_text, model_profiles, profile_weights
 from .preset_voices import PRESET_VOICES, reference_paths as preset_reference_paths
-from .tts_idextts2 import IndexTTS2Engine, IndexTTS2Unavailable
-
-
-INDEX_TTS2_ENGINE = IndexTTS2Engine(settings)
+from .runtime_paths import detect_ffmpeg, speaker_model_root
+from .audio_metrics import wav_metrics
+from . import prompt_guard
+from . import voice_adaptation
 
 
 def _legacy_probe_failure(details):
@@ -96,6 +97,8 @@ def _set_voice_synthesis_status(voice_id: str, status: str, message: str = "", d
 
 def _voice_synthesis_gate(voice_id: str):
     """Prevent direct API callers from using a clone before probe acceptance."""
+    if voice_adaptation.BUSY.is_set():
+        raise HTTPException(409, '正在创建专属音色，播报暂时等待训练和验收完成')
     if voice_id in PRESET_VOICES:
         return
     try:
@@ -112,29 +115,23 @@ def _voice_synthesis_gate(voice_id: str):
     if status == "failed":
         raise HTTPException(422, row[1] or "该克隆音色未通过实际合成验收，请重新录制")
     if status == "pending":
-        raise HTTPException(409, "该克隆音色正在进行实际合成验收，请稍候")
+        raise HTTPException(409, row[1] or "该克隆音色正在进行实际合成验收，请稍候")
 
 
 def _tts_provider():
-    """Return the configured engine id, accepting common IndexTTS2 aliases."""
-    value = str(settings.tts_provider or "idextts2").strip().lower().replace("_", "-")
-    if value in {"idextts2", "index-tts2", "indextts2", "index-tts-2"}:
-        return "idextts2"
+    """Return the project's only supported speech engine."""
     return "gpt-sovits"
 
 
 def _tts_global_reference_audio() -> str:
-    return (
-        settings.index_tts2_ref_audio
-        if _tts_provider() == "idextts2"
-        else settings.gpt_sovits_ref_audio
-    )
+    return settings.gpt_sovits_ref_audio
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
     _migrate_voice_synthesis_validation()
+    voice_adaptation.recover()
     with conn() as c:
         count = c.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
     if count == 0:
@@ -147,15 +144,27 @@ async def lifespan(_app: FastAPI):
                 c.execute('DELETE FROM chunks WHERE document_id=?',(item['id'],))
                 total=_write_chunks(c,item['id'],Path(item['path']))
                 c.execute('UPDATE documents SET chunks=? WHERE id=?',(total,item['id']))
-    warmup = _warmup_idextts2 if _tts_provider() == "idextts2" else _warmup_tts
-    threading.Thread(target=warmup, name=f"{_tts_provider()}-warmup", daemon=True).start()
-    yield
+    TTS_WARMUP.clear()
+    LIVE_PATH_WARMED.clear()
+    async with httpx.AsyncClient(timeout=httpx.Timeout(120, connect=10, read=60), trust_env=False) as client:
+        _app.state.tts_client = client
+        warmup_task = asyncio.create_task(_warmup_tts())
+        try:
+            yield
+        finally:
+            if warmup_task:
+                warmup_task.cancel()
+                try:
+                    await warmup_task
+                except asyncio.CancelledError:
+                    pass
+            _app.state.tts_client = None
 
 
 app = FastAPI(title="汽车直播智能体", version="0.3.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
+    allow_origins=["*"],  # Frontend uses same-origin /api, allow any host
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -230,6 +239,7 @@ class TTSRequest(BaseModel):
 
 
 class VoiceUpdate(BaseModel):
+    prompt_policy: str | None = Field(default=None, pattern='^(off|checked)$')
     name: str | None = None
     style: str | None = None
     prompt_text: str | None = None
@@ -293,11 +303,15 @@ _ACTIVE_MODEL_PROFILE = None
 _TTS_LAST_SUCCESS_AT = 0.0
 _TTS_LAST_FOREGROUND_AT = 0.0
 TTS_WARMUP = threading.Event()
+LIVE_PATH_WARMED = threading.Event()
+LIVE_PATH_WARMUP_ERROR = ''
+LIVE_PATH_WARMUP_MS = None
 VOICE_WARMING = set()
 VOICE_WARMED = set()
 VOICE_PROFILE_WARMING = set()
 VOICE_CALIBRATING = set()
 VOICE_CALIBRATION_QUEUE = set()
+VOICE_CALIBRATION_FORCED = set()
 VOICE_CALIBRATION_QUEUE_LOCK = threading.Lock()
 VOICE_CALIBRATION_WORKER_RUNNING = False
 CALIBRATION_DEFERRED = object()
@@ -410,7 +424,7 @@ def _tts_has_reference():
         return any(
             Path(row[0]).is_file()
             and _audio_quality(row[0]).get("status") == "ready"
-            and (_tts_provider() == "idextts2" or row[1].strip())
+            and row[1].strip()
             for row in rows
         )
     except Exception:
@@ -518,60 +532,76 @@ def replace_document(did: int, source: Path, name: str, brand: str, series: str,
     return did
 
 
-def _warmup_tts():
-    """Warm one usable profile so startup does not serialize every clone."""
-    voice_id = None
-    try:
-        if not settings.gpt_sovits_url:
-            return
-        deadline = time.monotonic() + 180
-        while not _gpt_sovits_reachable():
-            if time.monotonic() >= deadline:
-                return
-            time.sleep(1)
-        # Match the first-use picker. Other voices prime when selected.
-        voice_id = "steady"
-        request = TTSRequest(text=CLONE_VALIDATION_TEXT, voice_id=voice_id)
-        VOICE_WARMING.add(voice_id)
-        with _tts_lock(priority="background", timeout=0.5):
-            with httpx.Client(timeout=120, trust_env=False) as client:
-                _ensure_model_profile_loaded(_voice_model_profile(voice_id), client)
-                with client.stream("POST", _tts_endpoint(), json=_live_unit_params(request, 0)) as response:
-                    response.raise_for_status()
-                    received = sum(len(chunk) for chunk in response.iter_raw(8192))
-        if received > 128:
-            _mark_tts_success()
-            VOICE_WARMED.add(voice_id)
-    except Exception:
-        # The page can still load while the first selected voice primes itself.
-        pass
-    finally:
-        VOICE_WARMING.discard(voice_id)
+async def _warm_live_path_once():
+    """Dispatch through the actual ASGI route and fully drain its WAV/PCM stream.
+
+    No browser and no analytics event endpoint is involved. ASGI dispatch avoids
+    assuming an externally configured backend port, while executing the same
+    async transport, lock, weight check, decoder and WAV forwarding as playback.
+    """
+    global LIVE_PATH_WARMUP_MS
+    start = time.perf_counter()
+    # Chinese-only warmup left the first mixed-language answer at 4.285 s
+    # (repeat: 1.394 s). Include the automotive acronyms used in real playback
+    # so the English text frontend also executes before declaring readiness.
+    body = {'voice_id':'steady', 'text':'这款EV车型的CLTC续航为五百八十公里。', 'unitized':True,
+            'stream_batch':True, 'speed_factor':1.0, 'delivery':'natural'}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://warmup', trust_env=False) as client:
+        async with client.stream('POST', '/api/tts/stream', json=body) as response:
+            response.raise_for_status()
+            header, received, offset = bytearray(), 0, None
+            async for chunk in response.aiter_bytes():
+                received += len(chunk)
+                if offset is None:
+                    header.extend(chunk)
+                    offset = _wav_data_offset(header)
+                    if offset is not None: header.clear()
+            if offset is None or received-offset < 256:
+                raise RuntimeError('实时预热未收到有效 PCM')
+    LIVE_PATH_WARMUP_MS = round((time.perf_counter()-start)*1000, 1)
+    LIVE_PATH_WARMED.set()
+    VOICE_WARMED.add('steady')
+    logging.getLogger('uvicorn.error').info('live_path_warmup complete: %.1f ms', LIVE_PATH_WARMUP_MS)
+
+
+async def _warmup_tts():
+    """Warm the engine once and invalidate readiness after a runtime restart."""
+    global LIVE_PATH_WARMUP_ERROR, _ACTIVE_MODEL_PROFILE, _TTS_LAST_SUCCESS_AT
+    instance = None
+    if not settings.gpt_sovits_url:
         TTS_WARMUP.set()
-
-
-def _warmup_idextts2():
-    """Warm the separately configured IndexTTS2 engine and clone references."""
-    try:
-        voice_id = _preferred_clone_voice_id()
-        try:
-            ref, _prompt, _lang = _voice_config(voice_id)
-        except Exception:
-            ref = ""
-        if ref and INDEX_TTS2_ENGINE.probe():
-            VOICE_WARMING.add(voice_id)
+        return
+    async with httpx.AsyncClient(timeout=2, trust_env=False) as probe:
+        while True:
             try:
-                with _tts_lock(priority="background", timeout=0.5):
-                    INDEX_TTS2_ENGINE.warmup(ref)
-                VOICE_WARMED.add(voice_id)
-            finally:
-                VOICE_WARMING.discard(voice_id)
-    except Exception:
-        # The UI exposes the unavailable state and the next request retries;
-        # startup must remain usable while an optional model is installed.
-        pass
-    finally:
-        TTS_WARMUP.set()
+                response = await probe.get(settings.gpt_sovits_url.rstrip('/') + '/runtime/status')
+                response.raise_for_status()
+                current = response.json().get('instance_id', 'legacy')
+                if current != instance:
+                    LIVE_PATH_WARMED.clear()
+                    TTS_WARMUP.clear()
+                    VOICE_WARMED.clear()
+                    _ACTIVE_MODEL_PROFILE = None
+                    _TTS_LAST_SUCCESS_AT = 0
+                    instance = current
+                if not LIVE_PATH_WARMED.is_set():
+                    LIVE_PATH_WARMUP_ERROR = ''
+                    await _warm_live_path_once()
+                    TTS_WARMUP.set()
+                    _schedule_incomplete_calibrations()
+            except httpx.ReadTimeout:
+                # A busy single-worker runtime can delay status replies. This
+                # is not evidence of a restart and must not invalidate warmth.
+                pass
+            except Exception as exc:
+                # ASGI stream failures may be wrapped in an ExceptionGroup.
+                # Keep the retry task alive and expose the concrete failure.
+                LIVE_PATH_WARMUP_ERROR = f'{type(exc).__name__}: {exc}'[:300]
+                LIVE_PATH_WARMED.clear()
+                TTS_WARMUP.clear()
+                _TTS_LAST_SUCCESS_AT = 0
+                logging.getLogger('uvicorn.error').warning('live_path_warmup pending: %s', exc)
+            await asyncio.sleep(2)
 
 
 @app.get("/api/health")
@@ -601,71 +631,17 @@ def live2d_asset(asset_path: str):
 
 @app.get("/api/config/status")
 def config():
-    active_provider = _tts_provider()
-    if active_provider == "idextts2":
-        # Do not shadow the retrieval `index_status` imported from .rag; the
-        # response below still needs to call it.
-        engine_status = INDEX_TTS2_ENGINE.status()
-        tts_ready = bool(engine_status["ready"] and _tts_has_reference())
-        tts = {
-            "mode": "idextts2",
-            "provider": "IndexTTS2",
-            "provider_id": "idextts2",
-            "provider_label": engine_status["label"],
-            "model_version": engine_status["model_version"],
-            "speed_control": engine_status["speed_control_supported"],
-            "ready": tts_ready,
-            "configured": engine_status["configured"],
-            "reachable": engine_status["reachable"],
-            "endpoint": engine_status["endpoint"],
-        }
-    else:
-        gpt_ready = _tts_is_ready()
-        tts = {"mode": "gpt-sovits", "provider": "GPT-SoVITS", "ready": gpt_ready}
+    tts = {"mode": "gpt-sovits", "provider": "GPT-SoVITS", "ready": _tts_is_ready()}
     llm_ready = bool(_llm_endpoint() and settings.llm_model)
     return {
         "llm": llm_gateway.status(),
-        "tts": tts if tts["ready"] else {**tts, "mode": active_provider},
+        "tts": tts,
         "retrieval": index_status(),
     }
 
 
 @app.get("/api/tts/status")
 def tts_status():
-    if _tts_provider() == "idextts2":
-        status = INDEX_TTS2_ENGINE.status()
-        reference_configured = _tts_has_reference()
-        warming_up = not TTS_WARMUP.is_set() or bool(VOICE_WARMING)
-        ready = bool(status["ready"] and reference_configured and not warming_up)
-        with conn() as c:
-            rows = c.execute("SELECT reference_path,prompt_text FROM voices WHERE reference_path<>''").fetchall()
-        cloned = sum(
-            bool(row[0] and Path(row[0]).is_file() and _audio_quality(row[0]).get("status") == "ready")
-            for row in rows
-        )
-        return {
-            "provider": "idextts2",
-            # Report the version the engine really serves. A 2.0 checkpoint was
-            # previously advertised as 2.5 because the label was hardcoded.
-            "provider_label": status["label"],
-            "model_version": status["model_version"],
-            # `duration_factor` only exists in the 2.5 inference signature, so a
-            # 2.0 deployment accepts and drops the speed request.
-            "speed_control": status["speed_control_supported"],
-            "ready": ready,
-            "configured": status["configured"],
-            "reference_configured": reference_configured,
-            "reachable": status["reachable"],
-            "cloned_voices": cloned,
-            "endpoint": status["endpoint"],
-            "mode": status["mode"],
-            "streaming": ready,
-            "stream_mode": "pcm-wav-natural",
-            "streaming_mode": "phrase",
-            "warming_up": warming_up,
-            "warmed_voice_ids": sorted(VOICE_WARMED),
-            "calibrating_voice_ids": [],
-        }
     configured = _tts_has_reference()
     reachable = _gpt_sovits_reachable()
     # Profile priming is an opportunistic foreground warm-up. It may briefly
@@ -675,7 +651,7 @@ def tts_status():
     # Keep the provider identity stable while the model is loading. `ready`
     # means an inference can start immediately; it must not be confused with
     # the older browser fallback state during a normal page refresh.
-    ready = configured and reachable
+    ready = configured and reachable and LIVE_PATH_WARMED.is_set() and not voice_adaptation.BUSY.is_set()
     with conn() as c:
         rows = c.execute("SELECT reference_path,prompt_text FROM voices WHERE reference_path<>''").fetchall()
     cloned = sum(
@@ -683,8 +659,8 @@ def tts_status():
         for row in rows
     )
     return {
-        "provider": "gpt-sovits" if settings.gpt_sovits_url else "browser",
-        "provider_label": "GPT-SoVITS" if settings.gpt_sovits_url else "Web Speech API",
+        "provider": "gpt-sovits",
+        "provider_label": "GPT-SoVITS",
         "ready": ready,
         "configured": configured,
         "reachable": reachable,
@@ -695,14 +671,20 @@ def tts_status():
         "stream_mode": "pcm-wav-natural",
         "streaming_mode": settings.gpt_sovits_streaming_mode,
         "live_streaming_mode": settings.gpt_sovits_live_streaming_mode,
+        "live_path_warmed": LIVE_PATH_WARMED.is_set(),
+        "live_path_warmup_ms": LIVE_PATH_WARMUP_MS,
+        "live_path_warmup_error": LIVE_PATH_WARMUP_ERROR or None,
         "active_model_profile": _ACTIVE_MODEL_PROFILE or "unknown",
-        "model_profiles": ["base", "xilian"],
+        "model_profiles": list(model_profiles(settings)),
         "warming_up": warming_up,
         # Calibration is an optional background refinement. It must be
         # observable for the UI, but it must not make an already warmed clone
         # appear unavailable or route it to browser speech.
         "calibrating_voice_ids": sorted(VOICE_CALIBRATING),
         "warmed_voice_ids": sorted(VOICE_WARMED),
+        "prompt_checks": dict(prompt_guard.STATUS),
+        "adapting": voice_adaptation.BUSY.is_set(),
+        "adaptation_enabled": settings.gpt_sovits_adaptation_enabled,
     }
 
 
@@ -849,7 +831,7 @@ def _inspect_audio_quality(path: str):
     }
 
 
-def _probe_audio_payload(payload: bytes):
+def _probe_audio_payload(payload: bytes, *, expected_text: str | None = None):
     """Validate a generated WAV as speech, rather than merely as a file.
 
     Reference checks intentionally allow a 3-10 second recording. Generated
@@ -867,6 +849,7 @@ def _probe_audio_payload(payload: bytes):
             frame_count = stream.getnframes()
             duration = frame_count / float(sample_rate or 1)
             frames = stream.readframes(frame_count)
+            duration = len(frames) / float(sample_rate * channels * sample_width or 1)
     except (wave.Error, EOFError, OSError):
         return {"status": "failed", "message": "GPT-SoVITS 返回的不是标准 WAV 音频"}
     if sample_width != 2 or not sample_rate or not frames:
@@ -901,9 +884,12 @@ def _probe_audio_payload(payload: bytes):
     rms_db = 20 * math.log10(rms / 32768)
     peak_db = 20 * math.log10(peak / 32768)
     issues = []
-    if duration < 0.6:
+    expected = max(.6, len(re.sub(r'[\W_]+', '', expected_text, flags=re.UNICODE))/4.5) if expected_text else None
+    minimum = max(.25, expected*.3) if expected is not None else .6
+    maximum = prompt_guard.duration_limit(expected_text) if expected_text else 12.0
+    if duration < minimum:
         issues.append("合成结果过短，几乎没有有效语音")
-    elif duration > 12.0:
+    elif duration > maximum:
         issues.append("合成结果异常过长，疑似语义推理失控")
     if active_ratio < 0.20:
         issues.append("有效人声比例过低，可能只有叹息或静音")
@@ -924,11 +910,11 @@ def _probe_audio_payload(payload: bytes):
 
 
 def _ffmpeg_binary():
-    candidates = [
-        shutil.which("ffmpeg"),
-        r"C:\Program Files\CanMV IDE K230\share\qtcreator\ffmpeg\windows\bin\ffmpeg.exe",
-    ]
-    return next((item for item in candidates if item and Path(item).is_file()), None)
+    """Locate ffmpeg binary from PATH, environment variable, or GPT-SoVITS runtime."""
+    # Use the same discovery as startup, including installations found beside
+    # the project when GPT_SOVITS_ROOT and PATH have not been configured.
+    binary = detect_ffmpeg()
+    return str(binary) if binary else None
 
 
 def _decoded_peak_db(source: Path):
@@ -952,6 +938,59 @@ def _decoded_peak_db(source: Path):
     samples.frombytes(completed.stdout[: len(completed.stdout) - (len(completed.stdout) % 2)])
     peak = max((abs(sample) for sample in samples), default=0)
     return 20 * math.log10(peak / 32768) if peak else None
+
+
+@lru_cache(maxsize=128)
+def _decoded_levels(path: str, mtime: int, size: int):
+    """Measure the same mono/24kHz signal used for upload and microphone input."""
+    ffmpeg = _ffmpeg_binary()
+    if not ffmpeg:
+        quality = _audio_quality(path)
+        return {key: quality.get(key) for key in ('peak_db', 'rms_db')}
+    try:
+        result = subprocess.run([ffmpeg, '-hide_banner', '-loglevel', 'error', '-i', path,
+            '-vn', '-ac', '1', '-ar', '24000', '-f', 'f32le', '-'], capture_output=True, timeout=45)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise HTTPException(422, '参考音频电平检测失败，请检查音频文件或 ffmpeg 后重试') from exc
+    if result.returncode or not result.stdout:
+        raise HTTPException(422, '参考音频无法解码或预处理失败')
+    import array
+    samples = array.array('f', result.stdout)
+    peak = max(map(abs, samples), default=0)
+    rms = math.sqrt(sum(x*x for x in samples) / max(1, len(samples)))
+    return {'peak_db': 20*math.log10(max(peak, 1e-10)), 'rms_db': 20*math.log10(max(rms, 1e-10))}
+
+
+def _reference_levels(path: Path):
+    stat = path.stat()
+    return _decoded_levels(str(path.resolve()), stat.st_mtime_ns, stat.st_size)
+
+
+@lru_cache(maxsize=1)
+def _reference_target_rms():
+    # Six packaged references measured in docs/LIVE_TTS_AUDIT_20260918.md:
+    # Median of quality's one-decimal RMS readings: -18.05 dBFS. Compute from
+    # the installed catalog, not speaker gender (full precision: -18.0395).
+    levels = [_audio_quality(path).get('rms_db') for voice in PRESET_VOICES for path in preset_reference_paths(voice)]
+    values = [level for level in levels if level is not None]
+    return round(statistics.median(values), 2) if values else -20.0
+
+
+def _reference_quality(path: Path):
+    quality = _audio_quality(str(path))
+    if not path.is_file() or quality.get('status') == 'invalid':
+        return quality
+    original = _original_reference_audio(path)
+    if original.is_file():
+        before = _reference_levels(original)
+        after = _reference_levels(path)
+        quality['normalization'] = {
+            'target_rms_db': _reference_target_rms(), 'peak_ceiling_db': -3.0,
+            'before': {k: round(v, 2) if v is not None else None for k,v in before.items()},
+            'after': {k: round(v, 2) if v is not None else None for k,v in after.items()},
+            'rms_change_db': round(after['rms_db']-before['rms_db'], 2) if after['rms_db'] is not None and before['rms_db'] is not None else None,
+        }
+    return quality
 
 
 def _normalize_prompt_text(text: str):
@@ -993,7 +1032,7 @@ def _original_reference_audio(source: Path) -> Path:
     stem = source.stem
     base = stem
     bases = [stem]
-    derivative = re.compile(r"(?:\.normalized|\.clean|\.optimized\d*|\.processed|\.denoised|\.lite)$", re.IGNORECASE)
+    derivative = re.compile(r"(?:\.normalized|\.clean|\.optimized\d*|\.processed|\.denoised|\.lite|\.pauses|\.level-v2)$", re.IGNORECASE)
     while True:
         stripped = derivative.sub("", base)
         if stripped == base:
@@ -1014,27 +1053,21 @@ def _normalize_reference_audio(source: Path, *, force: bool = True):
     """Create a model-compatible WAV while preserving the speaker recording.
 
     GPT-SoVITS already rescales and resamples the reference internally.  Fixed
-    FFT denoising, low-pass filtering, loudness normalization, and aggressive
+    FFT denoising, low-pass filtering, and aggressive
     silence removal are destructive here: they change formants and often turn
     a clean recording into the electronic hiss heard in the clone.  The
     preprocessing step therefore only removes clearly excessive silence,
     decodes the source, folds it to mono, and writes deterministic 24 kHz/
-    16-bit PCM.
+    16-bit PCM with measured RMS alignment and peak protection.
     """
     quality = _audio_quality(str(source))
-    source_peak_db = quality.get("peak_db")
-    if source_peak_db is None:
-        source_peak_db = _decoded_peak_db(source)
-    # Keep enough headroom for the v2ProPlus decoder, but also prevent a quiet
-    # male recording from entering the model 10 dB below the rest of the
-    # library. The upward correction is deliberately capped so room noise is
-    # never amplified without bound.
-    gain_db = 0.0
-    if source_peak_db is not None:
-        if source_peak_db > -3.0:
-            gain_db = -3.0 - source_peak_db
-        elif source_peak_db < -9.0:
-            gain_db = min(6.0, -6.0 - source_peak_db)
+    levels = _reference_levels(source)
+    source_peak_db, source_rms_db = levels['peak_db'], levels['rms_db']
+    if source_rms_db is not None and source_rms_db < -45:
+        raise HTTPException(422, '参考音频人声电平过低，请靠近麦克风重新录制')
+    # Match the packaged references' measured median RMS. A lookahead limiter
+    # protects peaks; no denoising, pitch changes or internal pause compression.
+    gain_db = _reference_target_rms() - source_rms_db if source_rms_db is not None else 0.0
     peak_requires_adjustment = abs(gain_db) >= 0.1
     if (
         quality["status"] == "ready"
@@ -1042,6 +1075,7 @@ def _normalize_reference_audio(source: Path, *, force: bool = True):
         and quality.get("sample_rate") == 24000
         and quality.get("sample_width") == 2
         and not peak_requires_adjustment
+        and (source_peak_db is None or source_peak_db <= -3.0)
     ):
         return source
     ffmpeg = _ffmpeg_binary()
@@ -1061,12 +1095,30 @@ def _normalize_reference_audio(source: Path, *, force: bool = True):
     )
     if peak_requires_adjustment:
         filter_graph += f",volume={gain_db:.2f}dB"
+    # Bundled ffmpeg predates alimiter's latency option. Compensate its 5 ms
+    # lookahead explicitly, retaining the reference/transcript alignment.
+    filter_graph += ',apad=pad_dur=0.005,alimiter=limit=0.7079458:attack=5:release=50:level=false,atrim=start=0.005,asetpts=PTS-STARTPTS'
     try:
-        completed = subprocess.run(
-            [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-i", str(source),
-             "-af", filter_graph, "-map_metadata", "-1", "-ac", "1", "-ar", "24000", "-sample_fmt", "s16", str(target)],
-            capture_output=True, text=True, timeout=90,
-        )
+        # Trimming and peak limiting change RMS. Re-measure the actual file,
+        # adjusting the gain against the original input, never cascading
+        # normalization through already limited derivatives.
+        for attempt in range(4):
+            completed = subprocess.run(
+                [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-i", str(source),
+                 "-af", filter_graph, "-map_metadata", "-1", "-ac", "1", "-ar", "24000", "-sample_fmt", "s16", str(target)],
+                capture_output=True, text=True, timeout=90,
+            )
+            if completed.returncode or not target.is_file():
+                break
+            actual = _reference_levels(target)['rms_db']
+            correction = _reference_target_rms() - actual if actual is not None else 0
+            if abs(correction) <= .25 or attempt == 3:
+                break
+            gain_db += correction
+            if ',volume=' in filter_graph:
+                filter_graph = re.sub(r',volume=[^,]+', f',volume={gain_db:.3f}dB', filter_graph)
+            else:
+                filter_graph = filter_graph.replace(',apad=', f',volume={gain_db:.3f}dB,apad=')
     except (OSError, subprocess.TimeoutExpired) as exc:
         target.unlink(missing_ok=True)
         raise HTTPException(422, f"参考音频预处理失败：{exc}") from exc
@@ -1084,7 +1136,36 @@ def _normalize_reference_audio(source: Path, *, force: bool = True):
     return target
 
 
-def _calibrate_voice(voice_id: str):
+def _calibration_status(voice_id: str, status: str, message: str):
+    logging.getLogger('uvicorn.error').info('voice_calibration voice=%s status=%s reason=%s', voice_id, status, message)
+    with conn() as c:
+        c.execute('UPDATE voices SET calibration_status=?,calibration_message=?,calibration_checked_at=? WHERE id=?',
+                  (status, message[:1000], now(), voice_id))
+
+
+def _calibration_complete(row):
+    try:
+        details = json.loads(row['calibration_details'] or '{}')
+    except (TypeError, ValueError):
+        details = {}
+    return (all(row[key] is not None for key in ('sampling_seed', 'sampling_top_k', 'sampling_top_p',
+            'sampling_temperature', 'validated_aux_reference_paths'))
+            and row['sampling_model_version'] == settings.gpt_sovits_model_version
+            and details.get('calibration_version') == CALIBRATION_VERSION)
+
+
+def _schedule_incomplete_calibrations():
+    if not settings.gpt_sovits_calibration_enabled:
+        return
+    with conn() as c:
+        rows = c.execute("SELECT * FROM voices WHERE reference_path<>'' AND model_profile='base' "
+                         "AND synthesis_status='ready'").fetchall()
+    for row in rows:
+        if row['id'] not in PRESET_VOICES and not _calibration_complete(row):
+            _schedule_voice_calibration(row['id'])
+
+
+def _calibrate_voice(voice_id: str, *, force=False):
     """Filter references and jointly select identity/prosody sampling.
 
     Calibration is deliberately cooperative with live speech. Older versions
@@ -1094,6 +1175,7 @@ def _calibrate_voice(voice_id: str):
     scoring runs outside the lock and cannot interrupt playback.
     """
     if voice_id in PRESET_VOICES or not settings.gpt_sovits_calibration_enabled or voice_id in VOICE_CALIBRATING:
+        logging.getLogger('uvicorn.error').debug('voice_calibration skip voice=%s disabled/preset/already-running', voice_id)
         return None
     with conn() as c:
         row = c.execute(
@@ -1106,7 +1188,7 @@ def _calibrate_voice(voice_id: str):
         calibration_details = json.loads(row[10] or "{}") if row else {}
     except (TypeError, ValueError):
         calibration_details = {}
-    if not row or not row[0] or row[1] != "base" or (
+    if not row or not row[0] or row[1] != "base" or (not force and
         row[2] is not None and row[3] is not None and row[7] is not None and row[8] is not None
         and row[9] == settings.gpt_sovits_model_version and calibration_details.get("calibration_version") == CALIBRATION_VERSION
     ):
@@ -1115,6 +1197,7 @@ def _calibrate_voice(voice_id: str):
     python = Path(settings.gpt_sovits_python)
     checkpoint = Path(settings.gpt_sovits_speaker_model)
     if not (script.is_file() and python.is_file() and checkpoint.is_file()):
+        _calibration_status(voice_id, 'failed', '校准依赖缺失：请检查 Python、评分脚本与说话人权重路径')
         return None
     try:
         raw_aux = json.loads(row[4] or "[]")
@@ -1141,31 +1224,49 @@ def _calibrate_voice(voice_id: str):
     ]
     run_id = uuid4().hex[:10]
     candidate_dir = calibration_dir / f"{voice_id}-{run_id}"
+    candidate_dir.mkdir(parents=True, exist_ok=True)
     VOICE_CALIBRATING.add(voice_id)
+    _calibration_status(voice_id, 'running', '正在筛选参考与生成候选')
     try:
         def run_similarity(extra_args):
             command = [
                 str(python), str(script),
-                "--gpt-root", str(python.parent.parent.parent),
+                "--gpt-root", str(speaker_model_root(python, checkpoint)),
                 "--checkpoint", str(checkpoint),
                 "--aux-threshold", str(settings.gpt_sovits_aux_similarity_threshold),
             ]
             for reference in references:
                 command.extend(("--reference", str(reference)))
             command.extend(extra_args)
-            completed = subprocess.run(command, capture_output=True, text=True, timeout=120)
+            completed = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=120)
+            phase = 'scores' if extra_args else 'references'
+            (candidate_dir / f'{phase}.json').write_text(json.dumps({
+                'command': command, 'returncode': completed.returncode,
+                'stdout': completed.stdout, 'stderr': completed.stderr}, ensure_ascii=False, indent=2), encoding='utf-8')
             if completed.returncode != 0:
-                return None
+                raise RuntimeError(f'评分进程失败（{phase}，exit={completed.returncode}）：{completed.stderr[-600:]}')
             lines = (completed.stdout or "").strip().splitlines()
-            return json.loads(lines[-1]) if lines else None
+            if not lines:
+                raise RuntimeError(f'评分进程没有返回结果（{phase}）')
+            return json.loads(lines[-1])
 
         # Screen auxiliaries before synthesis so a mismatched clip never
         # influences the candidate audio. This subprocess performs only local
         # speaker-embedding work and does not touch the inference worker.
         screened = run_similarity([])
         if not screened:
-            return None
+            raise RuntimeError('参考筛选没有返回结果')
         accepted_aux = screened.get("accepted_aux_paths", [])
+        # Identity screening is necessary but does not certify continuity.
+        # Keep discontinuous auxiliaries out until their pauses are repaired
+        # and the resulting files are screened again.
+        withheld_aux = []
+        for path in list(accepted_aux):
+            metrics = wav_metrics(Path(path).read_bytes())
+            if metrics['max_internal_silence_s'] > 0.34:
+                accepted_aux.remove(path)
+                withheld_aux.append({'path': path, 'reason': 'internal-pause-over-0.34s', **metrics})
+        references = [references[0], *accepted_aux]
 
         request = TTSRequest(text=CALIBRATION_TEXT, voice_id=voice_id)
         base_params = _tts_params(request, seed_override=base_seed)
@@ -1193,13 +1294,15 @@ def _calibrate_voice(voice_id: str):
                     # A live request arrived while this candidate was waiting.
                     # Defer the optional refinement instead of adding latency to
                     # the foreground request or abandoning calibration forever.
+                    _calibration_status(voice_id, 'queued', '播报优先，校准等待空闲后继续')
                     return CALIBRATION_DEFERRED
                 if len(response.content) <= 128:
-                    return None
+                    raise RuntimeError('校准候选未返回有效音频')
                 label = str(spec.get("label") or spec.get("seed") or index)
                 safe_label = re.sub(r"[^A-Za-z0-9_.-]+", "-", label).strip("-.") or str(index)
                 candidate_path = candidate_dir / f"candidate-{safe_label}.wav"
                 candidate_path.write_bytes(response.content)
+                candidate_path.with_suffix('.request.json').write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
                 candidate_args.extend(("--candidate", f"{label}={candidate_path}"))
                 _mark_tts_success()
 
@@ -1208,7 +1311,7 @@ def _calibrate_voice(voice_id: str):
             + ["--candidate-specs-json", json.dumps(candidate_specs, ensure_ascii=False)]
         )
         if not output:
-            return None
+            raise RuntimeError('候选评分没有返回结果')
         best_candidate = output.get("best_candidate") or {}
         # ``--candidate`` is intentionally a local scoring mode. The mapping
         # above lets the helper include the original sampling profile in its
@@ -1233,13 +1336,16 @@ def _calibrate_voice(voice_id: str):
         if not current or (current[0], current[1] or "[]", current[2] or "") != calibration_signature:
             # The host edited the reference while this background run was in
             # flight. Never apply a result computed for the old speaker data.
-            return None
+            _calibration_status(voice_id, 'queued', '参考已修改，旧校准结果未应用')
+            return CALIBRATION_DEFERRED
         calibration_details = {
             "calibration_version": CALIBRATION_VERSION,
             "scores": output.get("scores", []),
-            "reference_scores": output.get("reference_scores", []),
+            "reference_scores": screened.get("reference_scores", []),
+            "withheld_aux": withheld_aux,
             "reference_prosody": output.get("reference_prosody", {}),
             "reference_prosody_risk": output.get("reference_prosody_risk", {}),
+            "evidence_dir": str(candidate_dir),
         }
         _save_voice_calibration(
             voice_id,
@@ -1251,6 +1357,7 @@ def _calibrate_voice(voice_id: str):
             details=calibration_details,
         )
         _mark_tts_success()
+        _calibration_status(voice_id, 'complete', '参数与辅助参考筛选结果已保存；听感仍需试听确认')
         return {
             "seed": best_seed,
             "top_k": best_top_k,
@@ -1260,22 +1367,46 @@ def _calibrate_voice(voice_id: str):
             "reference_scores": output.get("reference_scores", []),
             "accepted_aux_paths": accepted_aux,
         }
-    except (OSError, ValueError, KeyError, IndexError, json.JSONDecodeError, httpx.HTTPError, subprocess.TimeoutExpired, sqlite3.Error, RuntimeError):
+    except (OSError, ValueError, KeyError, IndexError, json.JSONDecodeError, httpx.HTTPError, subprocess.TimeoutExpired, sqlite3.Error, RuntimeError) as exc:
+        _calibration_status(voice_id, 'failed', f'{type(exc).__name__}: {exc}')
+        logging.getLogger('uvicorn.error').exception('voice_calibration failed voice=%s evidence=%s', voice_id, candidate_dir)
         return None
     finally:
         VOICE_CALIBRATING.discard(voice_id)
-        if candidate_dir.is_dir():
-            for candidate_path in candidate_dir.glob("candidate-*.wav"):
-                candidate_path.unlink(missing_ok=True)
-        try:
-            candidate_dir.rmdir()
-        except OSError:
-            pass
+        # Keep the four candidates and scorer output so failures and selections
+        # can be audited. Repeated page polling never starts another run.
+
+
+def _checked_voice_probe(client, params, identity):
+    """Use the production checked guard for creation and rollback acceptance."""
+    async def generate(attempt, max_duration):
+        data, limit, too_long = bytearray(), None, False
+        with client.stream('POST', _tts_endpoint(), json=attempt, timeout=30) as response:
+            response.raise_for_status()
+            for chunk in response.iter_bytes():
+                if too_long:
+                    continue
+                data.extend(chunk)
+                offset = _wav_data_offset(data)
+                if offset is not None and limit is None:
+                    with wave.open(io.BytesIO(data), 'rb') as wav:
+                        limit = offset + int(max_duration * wav.getframerate() * wav.getnchannels() * wav.getsampwidth())
+                if limit is not None and len(data) > limit:
+                    too_long = True
+                    data.clear()
+        if too_long:
+            raise prompt_guard.RunawayAudio('验收音频超过文本时长上限')
+        return bytes(data)
+    return asyncio.run(prompt_guard.checked_sentence(params, generate, _probe_audio_payload, identity))
 
 
 def _warm_single_voice(voice_id: str):
     """Warm one clone in the selected engine."""
+    if _tts_provider() == 'gpt-sovits' and voice_adaptation.run_pending(voice_id):
+        return
     if voice_id in VOICE_WARMED or voice_id in VOICE_WARMING:
+        if voice_id in VOICE_WARMED:
+            _schedule_voice_calibration(voice_id)
         return
     try:
         with conn() as c:
@@ -1289,29 +1420,6 @@ def _warm_single_voice(voice_id: str):
     if synthesis_status == "failed":
         return
     needs_probe = synthesis_status == "pending"
-    if _tts_provider() == "idextts2":
-        try:
-            reference_audio, _prompt_text, _prompt_lang = _voice_config(voice_id)
-            VOICE_WARMING.add(voice_id)
-            with _tts_lock(priority="background", timeout=0.5):
-                INDEX_TTS2_ENGINE.warmup(reference_audio)
-                if needs_probe:
-                    probe_audio = INDEX_TTS2_ENGINE.synthesize(
-                        text=CLONE_VALIDATION_TEXT,
-                        reference_audio=reference_audio,
-                    )
-                    probe = _probe_audio_payload(probe_audio)
-                    if probe["status"] != "ready":
-                        _set_voice_synthesis_status(voice_id, "failed", probe["message"], probe.get("duration"))
-                        return
-                    _set_voice_synthesis_status(voice_id, "ready", probe["message"], probe.get("duration"))
-            VOICE_WARMED.add(voice_id)
-        except Exception as exc:
-            if needs_probe:
-                _set_voice_synthesis_status(voice_id, "failed", f"实际合成验收失败：{str(exc)[:300]}")
-        finally:
-            VOICE_WARMING.discard(voice_id)
-        return
     if not settings.gpt_sovits_url:
         return
     VOICE_WARMING.add(voice_id)
@@ -1324,11 +1432,16 @@ def _warm_single_voice(voice_id: str):
                 with _tts_lock(priority="background", timeout=30):
                     _ensure_model_profile_loaded(_voice_model_profile(voice_id), client)
                     probe_params = _live_unit_params(TTSRequest(text=CLONE_VALIDATION_TEXT, voice_id=voice_id), 0)
-                    probe_params.update(streaming_mode=False, parallel_infer=True)
-                    probe_timeout = httpx.Timeout(30, connect=10, read=20, write=10, pool=10)
-                    probe_response = client.post(_tts_endpoint(), json=probe_params, timeout=probe_timeout)
-                    probe_response.raise_for_status()
-                    probe_audio = probe_response.content
+                    if _voice_prompt_policy(voice_id) == 'checked':
+                        probe_audio, check = _checked_voice_probe(client, probe_params, ['clone-probe', _voice_model_profile(voice_id)])
+                        if probe_audio is None:
+                            raise RuntimeError('逐句检查和回退后仍未通过实际合成验收')
+                    else:
+                        probe_params.update(streaming_mode=False, parallel_infer=True)
+                        probe_timeout = httpx.Timeout(30, connect=10, read=20, write=10, pool=10)
+                        probe_response = client.post(_tts_endpoint(), json=probe_params, timeout=probe_timeout)
+                        probe_response.raise_for_status()
+                        probe_audio = probe_response.content
                     if len(probe_audio) > 1_000_000:
                         raise RuntimeError("实际合成验收输出异常过长")
                     probe = _probe_audio_payload(probe_audio)
@@ -1364,25 +1477,11 @@ def _prime_voice_profile(voice_id: str):
     """Pay the global GPT-SoVITS weight-switch cost before live playback.
 
     GPT-SoVITS keeps one model pair in process-global state. A clone bound to
-    the other profile (for example the xilian fine-tune) otherwise makes the
-    first live sentence wait for a 4-7 second weight swap. Priming runs the
-    same locked, tiny request used by warmup so the subsequent live request
-    starts with the selected profile already resident.
+    a custom installed profile otherwise makes the first live sentence wait
+    for a weight swap. Priming runs the same locked, tiny request used by
+    warmup so the subsequent live request starts with the selected profile
+    already resident.
     """
-    if _tts_provider() == "idextts2":
-        if voice_id in VOICE_PROFILE_WARMING:
-            return
-        VOICE_PROFILE_WARMING.add(voice_id)
-        try:
-            reference_audio, _prompt_text, _prompt_lang = _voice_config(voice_id)
-            with _tts_lock(priority="foreground", timeout=20):
-                INDEX_TTS2_ENGINE.warmup(reference_audio, text="你好。")
-            VOICE_WARMED.add(voice_id)
-        except Exception:
-            pass
-        finally:
-            VOICE_PROFILE_WARMING.discard(voice_id)
-        return
     if not settings.gpt_sovits_url or voice_id in VOICE_PROFILE_WARMING:
         return
     profile = _voice_model_profile(voice_id)
@@ -1415,6 +1514,8 @@ def _prime_voice_profile(voice_id: str):
         pass
     finally:
         VOICE_PROFILE_WARMING.discard(voice_id)
+        if voice_id in VOICE_WARMED:
+            _schedule_voice_calibration(voice_id)
 
 
 def _voice_calibration_worker():
@@ -1429,27 +1530,33 @@ def _voice_calibration_worker():
     # Warmup owns the same inference lock and schedules jobs while it is still
     # loading voices. Wait until all model/profile priming is complete so a
     # calibration candidate cannot time out simply because startup is active.
-    TTS_WARMUP.wait(timeout=180)
+    while not TTS_WARMUP.wait(timeout=30):
+        logging.getLogger('uvicorn.error').info('voice_calibration worker waiting for live_path_warmed')
     while True:
         with VOICE_CALIBRATION_QUEUE_LOCK:
             if not VOICE_CALIBRATION_QUEUE:
                 VOICE_CALIBRATION_WORKER_RUNNING = False
                 return
             voice_id = VOICE_CALIBRATION_QUEUE.pop()
+            force = voice_id in VOICE_CALIBRATION_FORCED
+            VOICE_CALIBRATION_FORCED.discard(voice_id)
         try:
             # Do not even start the local screening subprocess while a live
             # request owns a foreground ticket. This avoids CPU contention and
             # lets the next candidate begin cleanly after playback is idle.
             _wait_for_calibration_idle(grace=True)
-            result = _calibrate_voice(voice_id)
+            result = _calibrate_voice(voice_id, force=force)
             if result is CALIBRATION_DEFERRED:
                 with VOICE_CALIBRATION_QUEUE_LOCK:
                     VOICE_CALIBRATION_QUEUE.add(voice_id)
+                    if force:
+                        VOICE_CALIBRATION_FORCED.add(voice_id)
                 time.sleep(0.5)
-        except Exception:
+        except Exception as exc:
             # Optional calibration must never terminate the worker or affect an
             # already usable clone.
-            pass
+            _calibration_status(voice_id, 'failed', str(exc))
+            logging.getLogger('uvicorn.error').exception('voice_calibration worker failed voice=%s', voice_id)
 
 
 def _wait_for_calibration_idle(*, grace=False):
@@ -1460,13 +1567,28 @@ def _wait_for_calibration_idle(*, grace=False):
             TTS_SCHEDULER.wait(timeout=1.0)
 
 
-def _schedule_voice_calibration(voice_id: str):
+def _schedule_voice_calibration(voice_id: str, *, force=False):
     """Queue calibration without making the first usable clone wait."""
     global VOICE_CALIBRATION_WORKER_RUNNING
     if voice_id in PRESET_VOICES or not settings.gpt_sovits_calibration_enabled or voice_id in VOICE_CALIBRATING:
         return
+    with conn() as c:
+        row = c.execute('SELECT * FROM voices WHERE id=?', (voice_id,)).fetchone()
+    if not row or not row['reference_path'] or row['model_profile'] != 'base' or row['synthesis_status'] != 'ready':
+        return
+    if not force and _calibration_complete(row):
+        return
+    if voice_adaptation.get_job(voice_id):
+        # Per-voice adaptation is a separate acoustic experiment; do not
+        # silently follow it with a sampling-parameter search.
+        return
     with VOICE_CALIBRATION_QUEUE_LOCK:
+        if voice_id in VOICE_CALIBRATION_QUEUE:
+            return
         VOICE_CALIBRATION_QUEUE.add(voice_id)
+        if force:
+            VOICE_CALIBRATION_FORCED.add(voice_id)
+        _calibration_status(voice_id, 'queued', '已排队，等待直播预热完成和播报空闲')
         if VOICE_CALIBRATION_WORKER_RUNNING:
             return
         VOICE_CALIBRATION_WORKER_RUNNING = True
@@ -1488,11 +1610,11 @@ def _voice_config(voice_id: str):
         row = c.execute("SELECT * FROM voices WHERE id=?", (voice_id,)).fetchone()
     global_reference = _tts_global_reference_audio()
     ref = row["reference_path"] if row and row["reference_path"] else global_reference
-    default_prompt = settings.index_tts2_prompt_text if _tts_provider() == "idextts2" else settings.gpt_sovits_prompt_text
+    default_prompt = settings.gpt_sovits_prompt_text
     prompt_text = row["prompt_text"] if row and row["prompt_text"] else default_prompt
     prompt_text = _normalize_prompt_text(prompt_text)
     prompt_lang = row["prompt_lang"] if row and row["prompt_lang"] else (
-        "zh" if _tts_provider() == "idextts2" else settings.gpt_sovits_prompt_language
+        settings.gpt_sovits_prompt_language
     )
     # A deployment may keep the global reference setting empty and store the
     # usable reference only in the voice library. In that case direct API calls
@@ -1694,6 +1816,7 @@ def _voice_model_profile(voice_id: str):
     """Resolve the model family for a voice without changing inference state."""
     if voice_id in PRESET_VOICES:
         return PRESET_VOICES[voice_id]['model_profile']
+    profiles = model_profiles(settings)
     with conn() as c:
         row = c.execute("SELECT model_profile,reference_path FROM voices WHERE id=?", (voice_id,)).fetchone()
     # Preset voices and newly uploaded samples use the v2ProPlus base model.  A
@@ -1707,7 +1830,7 @@ def _voice_model_profile(voice_id: str):
                     "SELECT model_profile FROM voices WHERE reference_path=? LIMIT 1",
                     (global_reference,),
                 ).fetchone()
-            if global_row and global_row[0] in {"base", "xilian"}:
+            if global_row and global_row[0] in profiles:
                 return global_row[0]
         # Preset ids intentionally reuse the newest validated clone when no
         # global reference is configured. Resolve that same fallback here so
@@ -1719,15 +1842,15 @@ def _voice_model_profile(voice_id: str):
             ).fetchall()
         for candidate in candidates:
             if _audio_quality(candidate[1]).get("status") == "ready":
-                return candidate[0] if candidate[0] in {"base", "xilian"} else "base"
+                return candidate[0] if candidate[0] in profiles else "base"
         return "base"
-    return row[0] if row[0] in {"base", "xilian"} else "base"
+    if row[0] and row[0] not in profiles:
+        raise HTTPException(503, '该音色的模型配置缺失，请恢复已安装的音色模型')
+    return row[0] or 'base'
 
 
 def _model_profile_weights(profile: str):
-    if profile == "xilian":
-        return settings.gpt_sovits_xilian_gpt_weights, settings.gpt_sovits_xilian_sovits_weights
-    return settings.gpt_sovits_base_gpt_weights, settings.gpt_sovits_base_sovits_weights
+    return profile_weights(settings, profile)
 
 
 def _ensure_model_profile_loaded(profile: str, client: httpx.Client):
@@ -1885,7 +2008,7 @@ def normalize_tts_text(text: str) -> str:
 # Splitting `580km` into `580` + `km` makes the upstream model read the value
 # as disconnected digits instead of the natural Chinese quantity.
 _TTS_ATOMIC_TOKEN = re.compile(
-    r"(?:百分之[零一二三四五六七八九十百千万亿兆点\d.]+"
+    r"(?:[A-Za-z]+(?:/[A-Za-z]+)?|百分之[零一二三四五六七八九十百千万亿兆点\d.]+"
     r"|\d+(?:\.\d+)?\s*(?:km/h|kWh|N·m|km|kW|Nm|公里|毫米|小时|秒|%|L|万元|万|元|年|款|版|型号|EV)?"
     r"|[零一二三四五六七八九十百千万亿兆点]+(?:公里每小时|千瓦时|牛米|公里|毫米|小时|秒|百分之|升|万元|元|年|款|版|型号|EV)?)",
     re.IGNORECASE,
@@ -1906,9 +2029,23 @@ def _safe_tts_cut(text: str, limit: int) -> int:
     return max(1, end)
 
 
+def _voice_prompt_policy(voice_id: str):
+    if voice_id in PRESET_VOICES:
+        return 'off'
+    try:
+        with conn() as c:
+            row=c.execute('SELECT prompt_policy FROM voices WHERE id=?',(voice_id,)).fetchone()
+    except sqlite3.Error:
+        return 'off'
+    return row[0] if row else 'off'
+
+
 def _tts_params(req: TTSRequest, *, streaming: bool = False, seed_override: int | None = None):
     ref, prompt_text, prompt_lang = _voice_config(req.voice_id)
     aux_refs = _voice_aux_reference_paths(req.voice_id)
+    model_profile = _voice_model_profile(req.voice_id)
+    model_config = model_profiles(settings)[model_profile]
+    speaker_reference = model_config.get('speaker_ref_audio_path')
     live_model_mode = settings.gpt_sovits_streaming_mode if streaming else False
     builtin = req.voice_id in PRESET_VOICES
     profile = {}
@@ -1924,11 +2061,9 @@ def _tts_params(req: TTSRequest, *, streaming: bool = False, seed_override: int 
     requested_top_k = sampling.get("top_k", 15) if builtin or req.top_k is None else req.top_k
     requested_top_p = sampling["top_p"] if builtin or req.top_p is None else req.top_p
     requested_temperature = sampling["temperature"] if builtin or req.temperature is None else req.temperature
-    # Keep a bounded expressive floor for live clones. The old low-entropy cap
-    # made every speaker flat and caused calibrated conservative profiles to
-    # lose pitch motion. Explicit request values still win for diagnostics and
-    # previews.
-    if streaming and not builtin:
+    # Validated sampling must survive live playback unchanged. Floors only
+    # supply an uncalibrated fallback; explicit overrides still win.
+    if streaming and not builtin and not sampling.get('calibrated'):
         if req.top_k is None:
             requested_top_k = max(int(requested_top_k), settings.gpt_sovits_clone_live_top_k)
         if req.top_p is None:
@@ -1940,7 +2075,7 @@ def _tts_params(req: TTSRequest, *, streaming: bool = False, seed_override: int 
     temperature = max(0.1, min(2.0, float(requested_temperature) + profile.get("temperature", 0.0)))
     repetition_penalty = max(0.5, min(3.0, float(requested_repetition) + profile.get("repetition", 0.0)))
     normalized_text = normalize_tts_text(req.text)
-    if (streaming and not builtin and not settings.gpt_sovits_live_use_prompt_text
+    if (streaming and not builtin and not settings.gpt_sovits_live_use_prompt_text and _voice_prompt_policy(req.voice_id) != 'checked'
             and settings.gpt_sovits_model_version in {'v2', 'v2Pro', 'v2ProPlus'}
             and _voice_model_profile(req.voice_id) == 'base'):
         # Reference-free semantics can help diagnose a mismatched transcript,
@@ -1950,13 +2085,13 @@ def _tts_params(req: TTSRequest, *, streaming: bool = False, seed_override: int 
         seed = int(seed_override) & 0x7FFFFFFF
     else:
         seed = _voice_sampling_seed(req.voice_id)
-        if streaming and not builtin:
-            # A fixed clone seed can make one bad semantic continuation repeat
-            # on every sentence. Keep speaker identity stable while varying
-            # the sampling path with the normalized sentence. Previews and
-            # calibration retain deterministic per-voice seeds.
-            seed = (seed ^ zlib.crc32(normalized_text.encode("utf-8"))) & 0x7FFFFFFF
+        if streaming and not builtin and settings.gpt_sovits_live_seed_mode == 'text-low8':
+            seed ^= zlib.crc32(normalized_text.encode('utf-8')) & 255
     return {
+        **({'speaker_ref_audio_path': speaker_reference} if speaker_reference else {}),
+        **({'speaker_aux_ref_audio_paths': model_config['speaker_aux_ref_audio_paths'],
+            'speaker_similarity_threshold': settings.gpt_sovits_aux_similarity_threshold}
+           if 'speaker_aux_ref_audio_paths' in model_config else {}),
         "ref_audio_path": ref,
         "aux_ref_audio_paths": aux_refs,
         "prompt_text": prompt_text,
@@ -2013,6 +2148,17 @@ def _live_unit_params(req: TTSRequest, unit_index: int):
     params['streaming_mode'] = settings.gpt_sovits_live_streaming_mode
     params['parallel_infer'] = params['streaming_mode'] not in (2, 3)
     return params
+
+
+def _effective_live_settings(voice_id: str, params: dict | None = None):
+    params = params or _live_unit_params(TTSRequest(voice_id=voice_id, text=CLONE_VALIDATION_TEXT), 0)
+    return {**{key: params[key] for key in ('top_k','top_p','temperature','seed','speed_factor','streaming_mode')},
+            'use_prompt_text': bool(params['prompt_text']),
+            'model_profile': _voice_model_profile(voice_id),
+            'prompt_policy': _voice_prompt_policy(voice_id),
+            'speaker_anchor': ('scored-fusion' if params.get('speaker_aux_ref_audio_paths') is not None
+                               else 'original-reference') if params.get('speaker_ref_audio_path') else 'reference-list',
+            'seed_mode': 'fixed' if voice_id in PRESET_VOICES else settings.gpt_sovits_live_seed_mode}
 
 
 def _tts_text_units(text: str, max_chars: int = 40):
@@ -2193,15 +2339,6 @@ def _tts_endpoint():
 
 
 def _ensure_tts_ready():
-    if _tts_provider() == "idextts2":
-        if not _tts_has_reference():
-            raise HTTPException(503, "IndexTTS2 尚未配置可用参考音频")
-        status = INDEX_TTS2_ENGINE.status()
-        if not status["configured"]:
-            raise HTTPException(503, "IndexTTS2 未配置，请设置 INDEX_TTS2_URL 或本地模型路径")
-        if not status["reachable"]:
-            raise HTTPException(503, "IndexTTS2 服务未启动或本地模型不可用")
-        return
     if not _tts_has_reference():
         raise HTTPException(503, "GPT-SoVITS 尚未配置可用参考音频")
     if not _gpt_sovits_reachable():
@@ -2357,18 +2494,6 @@ def _spoken_answer_text(text):
 def synthesize_tts(req: TTSRequest):
     _ensure_tts_ready()
     _voice_synthesis_gate(req.voice_id)
-    if _tts_provider() == "idextts2":
-        try:
-            reference_audio, _prompt_text, _prompt_lang = _voice_config(req.voice_id)
-            audio = INDEX_TTS2_ENGINE.synthesize(
-                text=normalize_tts_text(req.text),
-                reference_audio=reference_audio,
-                speed_factor=req.speed_factor,
-            )
-        except (IndexTTS2Unavailable, RuntimeError) as exc:
-            raise HTTPException(502, f"IndexTTS2 服务调用失败：{exc}") from exc
-        _mark_tts_success()
-        return Response(content=audio, media_type="audio/wav")
     try:
         with _foreground_ticket():
             with _tts_lock(priority="foreground"):
@@ -2381,55 +2506,115 @@ def synthesize_tts(req: TTSRequest):
     return Response(content=response.content, media_type=response.headers.get("content-type", "audio/wav"))
 
 
+@asynccontextmanager
+async def _live_tts_client():
+    client = getattr(app.state, 'tts_client', None)
+    if client is not None:
+        yield client
+    else:
+        # Direct unit tests do not run the application's lifespan.
+        async with httpx.AsyncClient(timeout=120, trust_env=False) as fallback:
+            yield fallback
+
+
+async def _guarded_prompt_stream(req: TTSRequest, request: Request, units: list[str]):
+    # Check full sentences, retaining commas and the browser's first phrase.
+    # Every sentence is fully buffered before playback; future PCM is never
+    # described as validated before it has actually been synthesized.
+    sentences = [part for unit in units for part in re.findall(r'[^。！？!?；;]+[。！？!?；;]?', unit) if part.strip()]
+    if not sentences:
+        raise HTTPException(422, '播报文本为空')
+    request_id=uuid4().hex
+    checks=[]
+    profile=_voice_model_profile(req.voice_id)
+    weights=_model_profile_weights(profile)
+    identity=[settings.gpt_sovits_model_version,profile,
+              [(str(path),Path(path).stat().st_mtime_ns if path and Path(path).is_file() else None) for path in weights]]
+
+    async def prepare(sentence):
+        params=_live_unit_params(req.model_copy(update={'text':sentence}),0)
+        params['prompt_text']=_voice_config(req.voice_id)[1]
+        async with _live_tts_client() as client:
+            with _foreground_ticket():
+                async with _async_tts_lock():
+                    await _ensure_model_profile_loaded_async(profile,client)
+                    async def generate(attempt, max_duration):
+                        data=bytearray();max_bytes=None;too_long=False;disconnected=False
+                        async with client.stream('POST',_tts_endpoint(),json=attempt) as response:
+                            response.raise_for_status()
+                            async for chunk in response.aiter_bytes():
+                                disconnected = disconnected or await request.is_disconnected()
+                                # Drain an invalid candidate before retrying.
+                                # Closing the upstream generator early leaves
+                                # its inference thread alive in this runtime.
+                                if too_long:
+                                    continue
+                                data.extend(chunk)
+                                offset=_wav_data_offset(data)
+                                if offset is not None and max_bytes is None:
+                                    with wave.open(io.BytesIO(data),'rb') as wav:
+                                        max_bytes=offset+int(max_duration*wav.getframerate()*wav.getnchannels()*wav.getsampwidth())
+                                if max_bytes is not None and len(data)>max_bytes:
+                                    too_long=True;data.clear()
+                        if disconnected:
+                            raise asyncio.CancelledError()
+                        if too_long:
+                            raise prompt_guard.RunawayAudio(f'合成音频超过文本时长上限 {max_duration:.2f} 秒，候选已丢弃')
+                        _mark_tts_success()
+                        return bytes(data)
+                    audio,check=await prompt_guard.checked_sentence(params,generate,_probe_audio_payload,identity)
+        checks.append(check);prompt_guard.record_status(req.voice_id,request_id,checks)
+        if audio is None:
+            raise HTTPException(502,'该句在两次重试和无参考原文回退后仍未通过音频检查，请查看音色状态后重试')
+        return audio
+
+    try:
+        first=await prepare(sentences[0])
+    except httpx.HTTPError as exc:
+        raise HTTPException(502,f'GPT-SoVITS 服务调用失败：{exc}') from exc
+    effective=_effective_live_settings(req.voice_id,_live_unit_params(req.model_copy(update={'text':sentences[0]}),0))
+    # A successful retry may use a different seed from the voice's saved
+    # default. Report the candidate actually delivered, including cache hits.
+    effective['seed'] = checks[0]['attempts'][-1]['seed']
+    effective.update(prompt_policy='checked',use_prompt_text=not checks[0]['fallback_without_prompt'],
+                     prompt_retry_count=checks[0]['prompt_retry_count'],cache_hit=checks[0]['cache_hit'])
+    async def chunks():
+        with _foreground_ticket():
+            yield from_header(first)
+            for sentence in sentences[1:]:
+                if await request.is_disconnected():return
+                audio=await prepare(sentence)
+                for chunk in _iter_pcm_wav_payload([audio],include_header=False):yield chunk
+    # Match GPT-SoVITS's existing open-ended PCM header. Already-open browser
+    # tabs may still run the older parser, which waits for the declared data
+    # length before recognizing the header. A large sentinel stalls them;
+    # zero is the streaming convention already used by the regular route.
+    def from_header(audio):
+        data=bytearray(audio)
+        offset=_wav_data_offset(data)
+        struct.pack_into('<I',data,4,offset-8)
+        struct.pack_into('<I',data,offset-4,0)
+        return bytes(data)
+    return StreamingResponse(chunks(),media_type='audio/wav',headers={
+        'Cache-Control':'no-store','X-Accel-Buffering':'no','X-TTS-Mode':'gpt-sovits-checked-pcm',
+        'X-TTS-Request-Id':request_id,'X-TTS-Effective-Settings':json.dumps(effective),
+    })
+
+
 @app.post("/api/tts/stream")
 async def stream_tts(req: TTSRequest, request: Request):
     """Pass selected-engine PCM fragments through without buffering the full script."""
     _ensure_tts_ready()
     _voice_synthesis_gate(req.voice_id)
-    if _tts_provider() == "idextts2":
-        units = _tts_stream_units(req)
-
-        async def index_iterator():
-            sent_wav_header = False
-            try:
-                with _foreground_ticket():
-                    for unit in units:
-                        if await request.is_disconnected():
-                            return
-                        async with _async_tts_lock():
-                            reference_audio, _prompt_text, _prompt_lang = _voice_config(req.voice_id)
-                            audio = await asyncio.to_thread(
-                                INDEX_TTS2_ENGINE.synthesize,
-                                text=normalize_tts_text(unit),
-                                reference_audio=reference_audio,
-                                speed_factor=req.speed_factor,
-                            )
-                            _mark_tts_success()
-                            for chunk in _iter_pcm_wav_payload([audio], include_header=not sent_wav_header):
-                                if not sent_wav_header or chunk[:4] == b"RIFF":
-                                    sent_wav_header = True
-                                yield chunk
-            except (GeneratorExit, asyncio.CancelledError):
-                return
-            except (IndexTTS2Unavailable, RuntimeError) as exc:
-                raise RuntimeError(f"IndexTTS2 流式调用失败：{exc}") from exc
-
-        return StreamingResponse(
-            index_iterator(),
-            media_type="audio/wav",
-            headers={
-                "Cache-Control": "no-store",
-                "X-Accel-Buffering": "no",
-                "X-TTS-Mode": "idextts2-pcm-stream",
-            },
-        )
     endpoint = _tts_endpoint()
     units = _tts_stream_units(req)
+    if _voice_prompt_policy(req.voice_id) == 'checked':
+        return await _guarded_prompt_stream(req, request, units)
+    effective = _effective_live_settings(req.voice_id, _live_unit_params(req.model_copy(update={'text':units[0]}), 0))
 
     async def iterator():
         try:
-            timeout = httpx.Timeout(120, connect=10, read=30, write=10, pool=10)
-            async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+            async with _live_tts_client() as client:
                 with _foreground_ticket():
                     sent_wav_header = False
                     for unit_index, unit in enumerate(units):
@@ -2440,13 +2625,15 @@ async def stream_tts(req: TTSRequest, request: Request):
                         async with _async_tts_lock():
                             await _ensure_model_profile_loaded_async(_voice_model_profile(req.voice_id), client)
                             params = _live_unit_params(req.model_copy(update={"text": unit}), unit_index)
-                            params["streaming_mode"] = settings.gpt_sovits_live_streaming_mode
                             async with client.stream("POST", endpoint, json=params) as response:
                                 response.raise_for_status()
                                 _mark_tts_success()
                                 header_buffer = b""
                                 data_started = False
-                                async for chunk in response.aiter_raw(8192):
+                                # Preserve the model's flush boundaries. A fixed
+                                # httpx chunk size can hold an already available
+                                # short first PCM fragment until the next decode.
+                                async for chunk in response.aiter_raw():
                                     if await request.is_disconnected():
                                         return
                                     if data_started:
@@ -2477,6 +2664,7 @@ async def stream_tts(req: TTSRequest, request: Request):
             "Cache-Control": "no-store",
             "X-Accel-Buffering": "no",
             "X-TTS-Mode": "gpt-sovits-pcm-stream",
+            "X-TTS-Effective-Settings": json.dumps(effective),
         },
     )
 
@@ -2754,19 +2942,22 @@ def voices():
     with conn() as c:
         # Include quality data for both packaged and uploaded reference audio.
         rows = [dict(x) for x in c.execute(
-            "SELECT id,name,style,provider,prompt_text,prompt_lang,model_profile,aux_reference_paths,"
+            "SELECT id,name,style,provider,prompt_text,prompt_lang,model_profile,aux_reference_paths,aux_prompt_texts,"
             "sampling_seed,sampling_top_k,sampling_top_p,sampling_temperature,sampling_model_version,calibration_details,"
+            "calibration_status,calibration_message,calibration_checked_at,"
+            "prompt_policy,"
             "synthesis_status,synthesis_message,synthesis_duration,created_at,"
             "CASE WHEN reference_path<>'' THEN 1 ELSE 0 END AS cloned FROM voices"
         ).fetchall()]
         paths = {row["id"]: row["reference_path"] for row in c.execute("SELECT id,reference_path FROM voices").fetchall()}
     for row in rows:
+        row['adaptation'] = voice_adaptation.get_job(row['id'])
         builtin = PRESET_VOICES.get(row['id'])
         row['builtin'] = bool(builtin)
         row['kind'] = 'builtin' if builtin else 'clone' if row['cloned'] else 'system'
         row['description'] = builtin['description'] if builtin else ''
         row['gender'] = builtin['gender'] if builtin else ''
-        row["quality"] = _audio_quality(paths.get(row["id"], "")) if row["cloned"] else {"status": "system", "message": "系统音色"}
+        row["quality"] = _reference_quality(Path(paths[row["id"]])) if row["cloned"] else {"status": "system", "message": "系统音色"}
         synthesis_status = (row.get("synthesis_status") or "ready") if row["cloned"] else "ready"
         synthesis_message = row.get("synthesis_message") or ""
         if row["cloned"] and synthesis_status == "failed":
@@ -2787,6 +2978,10 @@ def voices():
         row["reference_count"] = 1 + len(effective_aux_paths) if row["cloned"] else 0
         row["uploaded_reference_count"] = raw_reference_count
         row.pop("aux_reference_paths", None)
+        try:
+            row['aux_prompt_texts'] = json.loads(row.get('aux_prompt_texts') or '[]')
+        except (ValueError, TypeError):
+            row['aux_prompt_texts'] = []
         if row["cloned"] and not (row.get("prompt_text") or "").strip():
             row["quality"]["status"] = "needs-review"
             row["quality"]["message"] = "参考文本未填写；" + row["quality"].get("message", "请补充与录音完全一致的文本")
@@ -2811,11 +3006,14 @@ def voices():
         }
         reference_risk = calibration_details.get("reference_prosody_risk") or {}
         if reference_risk.get("level") == "high":
-            row["prosody_advice"] = "参考录音语气起伏较强，已自动采用更稳定的合成参数"
+            row["prosody_advice"] = "参考录音音高起伏较强；参数已筛选，语调自然度请试听确认"
         elif row["sampling_calibrated"]:
-            row["prosody_advice"] = "已联合校准音色相似度与语气稳定性"
+            row["prosody_advice"] = "音色与音高指标已参与参数筛选；听感请试听确认"
         else:
-            row["prosody_advice"] = "正在分析音色与语气"
+            row["prosody_advice"] = {
+                'queued': '校准已排队，等待播报空闲', 'running': '正在筛选音色与语气候选',
+                'failed': '校准失败，可点击重新校准', 'idle': '尚未校准',
+            }.get(row.get('calibration_status'), '尚未完成校准')
         row["warming"] = row["id"] in VOICE_WARMING
         row.pop("sampling_seed", None)
         row.pop("sampling_top_k", None)
@@ -2837,6 +3035,12 @@ def voices():
             row['sampling_profile'] = {key: value for key, value in _voice_sampling_profile(row['id']).items() if key != 'seed'}
             row['prosody_advice'] = ''
             row['calibrating'] = row['calibration_pending'] = False
+        if row['cloned'] or builtin:
+            try:
+                row['effective_live'] = _effective_live_settings(row['id'])
+                row['seed_mode'] = row['effective_live']['seed_mode']
+            except HTTPException as exc:
+                row['effective_live'] = {'error':str(exc.detail)}
         row['editable'] = bool(row['cloned'])
     # Keep the packaged catalog first, then recent usable clones and system voices.
     rows.sort(key=lambda row: row.get("created_at") or "", reverse=True)
@@ -2851,6 +3055,23 @@ def voices():
     return rows
 
 
+@app.post('/api/voices/{voice_id}/calibrate')
+def calibrate_voice(voice_id: str):
+    if voice_adaptation.get_job(voice_id):
+        raise HTTPException(409, '此音色使用专属训练流程；请使用“生成专属音色”或“恢复训练前版本”')
+    with conn() as c:
+        row = c.execute('SELECT * FROM voices WHERE id=?', (voice_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, '音色不存在')
+    if voice_id in PRESET_VOICES or not row['reference_path'] or row['model_profile'] != 'base':
+        raise HTTPException(422, '此音色不使用零样本克隆校准')
+    if not settings.gpt_sovits_calibration_enabled or _tts_provider() != 'gpt-sovits':
+        raise HTTPException(409, '当前引擎未启用 GPT-SoVITS 校准')
+    _voice_synthesis_gate(voice_id)
+    _schedule_voice_calibration(voice_id, force=True)
+    return {'id': voice_id, 'status': 'running' if voice_id in VOICE_CALIBRATING else 'queued'}
+
+
 @app.post("/api/voices/{voice_id}/prime")
 def prime_voice(voice_id: str):
     """Preload a voice's model profile before the operator starts playback."""
@@ -2859,11 +3080,6 @@ def prime_voice(voice_id: str):
     if not row:
         raise HTTPException(404, "音色不存在")
     profile = _voice_model_profile(voice_id)
-    if _tts_provider() == "idextts2":
-        if not INDEX_TTS2_ENGINE.configured():
-            return {"id": voice_id, "profile": "idextts2", "warming": False, "ready": False}
-        _prime_voice_profile(voice_id)
-        return {"id": voice_id, "profile": "idextts2", "warming": False, "ready": voice_id in VOICE_WARMED}
     if not settings.gpt_sovits_url:
         return {"id": voice_id, "profile": profile, "warming": False, "ready": False}
     # This request is intentionally synchronous from the API caller's point of
@@ -2891,7 +3107,7 @@ async def analyze_voice(sample: UploadFile = File(...), aux_samples: List[Upload
         if path.stat().st_size < 16 * 1024:
             raise HTTPException(422, "参考音频过短或无有效音频数据，请上传清晰、单人录制的 3 到 10 秒样本")
         generated = _normalize_reference_audio(path, force=True)
-        quality = _audio_quality(str(generated))
+        quality = _reference_quality(generated)
         for aux_sample in aux_samples[:MAX_AUX_REFERENCE_AUDIO]:
             aux_suffix = Path(aux_sample.filename or "").suffix.lower()
             if aux_suffix not in ALLOWED_AUDIO:
@@ -2902,7 +3118,7 @@ async def analyze_voice(sample: UploadFile = File(...), aux_samples: List[Upload
                 aux_source.unlink(missing_ok=True)
                 raise HTTPException(422, "每条辅助参考音频都需要 3 到 10 秒的清晰人声")
             aux_normalized = _normalize_reference_audio(aux_source, force=True)
-            aux_quality = _audio_quality(str(aux_normalized))
+            aux_quality = _reference_quality(aux_normalized)
             if aux_quality["status"] != "ready":
                 raise HTTPException(422, f"辅助参考音频不适合快速克隆：{aux_quality['message']}")
             aux_paths.append(aux_normalized)
@@ -2926,7 +3142,7 @@ async def analyze_voice(sample: UploadFile = File(...), aux_samples: List[Upload
 
 
 @app.post("/api/voices/clone")
-async def clone_voice(sample: UploadFile = File(...), aux_samples: List[UploadFile] = File(default=[]), name: str = Form("自定义主播"), style: str = Form("克隆"), prompt_text: str = Form(""), prompt_lang: str = Form("zh")):
+async def clone_voice(sample: UploadFile = File(...), aux_samples: List[UploadFile] = File(default=[]), name: str = Form("自定义主播"), style: str = Form("克隆"), prompt_text: str = Form(""), prompt_lang: str = Form("zh"), aux_prompt_texts: List[str] = Form(default=[])):
     suffix = Path(sample.filename or "").suffix.lower()
     if suffix not in ALLOWED_AUDIO:
         raise HTTPException(400, "音色样本仅支持 WAV、MP3、FLAC、OGG、M4A")
@@ -2938,11 +3154,14 @@ async def clone_voice(sample: UploadFile = File(...), aux_samples: List[UploadFi
         raise HTTPException(422, "参考音频原文不能超过 500 个字符")
     if len(aux_samples) > MAX_AUX_REFERENCE_AUDIO:
         raise HTTPException(422, f"最多添加 {MAX_AUX_REFERENCE_AUDIO} 条辅助参考音频")
+    if aux_prompt_texts and (len(aux_prompt_texts) != len(aux_samples) or any(len(text)>500 for text in aux_prompt_texts)):
+        raise HTTPException(422, '辅助参考原文必须与样本一一对应，且每段不超过 500 字')
     folder = settings.upload_dir / "voices"
     folder.mkdir(parents=True, exist_ok=True)
     path = await _save_upload(sample, folder, ALLOWED_AUDIO, settings.max_audio_bytes, "音色样本")
     aux_sources = []
     aux_normalized = []
+    reference_path = path
     if path.stat().st_size < 16 * 1024:
         path.unlink(missing_ok=True)
         raise HTTPException(422, "参考音频过短或无有效音频数据，请上传清晰、单人录制的 3 到 10 秒样本")
@@ -2959,11 +3178,13 @@ async def clone_voice(sample: UploadFile = File(...), aux_samples: List[UploadFi
             aux_normalized.append(_normalize_reference_audio(aux_source, force=True))
     except Exception:
         path.unlink(missing_ok=True)
+        if reference_path != path:
+            reference_path.unlink(missing_ok=True)
         for item in aux_sources + aux_normalized:
             item.unlink(missing_ok=True)
         raise
     vid = "voice-" + uuid4().hex[:12]
-    quality = _audio_quality(str(reference_path))
+    quality = _reference_quality(reference_path)
     if quality["status"] == "invalid":
         path.unlink(missing_ok=True)
         if reference_path != path:
@@ -2980,7 +3201,7 @@ async def clone_voice(sample: UploadFile = File(...), aux_samples: List[UploadFi
         raise HTTPException(422, f"参考音频暂不适合快速克隆：{quality['message']}。请先更换干净样本")
     aux_quality = []
     for aux_path in aux_normalized:
-        item_quality = _audio_quality(str(aux_path))
+        item_quality = _reference_quality(aux_path)
         if item_quality["status"] != "ready":
             path.unlink(missing_ok=True)
             if reference_path != path:
@@ -2994,12 +3215,15 @@ async def clone_voice(sample: UploadFile = File(...), aux_samples: List[UploadFi
         with conn() as c:
             c.execute(
                 "INSERT INTO voices(id,name,style,provider,reference_path,prompt_text,prompt_lang,"
-                "aux_reference_paths,model_profile,synthesis_status,synthesis_message,created_at) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                "aux_reference_paths,model_profile,synthesis_status,synthesis_message,created_at,aux_prompt_texts,prompt_policy) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (vid, name, style, _tts_provider(), str(reference_path), prompt_text, prompt_lang,
                  json.dumps([str(item) for item in aux_normalized], ensure_ascii=False), "base", "pending",
-                 "正在进行实际合成验收", now()),
+                 "正在进行实际合成验收", now(), json.dumps([_normalize_prompt_text(text) for text in aux_prompt_texts], ensure_ascii=False),
+                 settings.gpt_sovits_clone_prompt_policy),
             )
+            if _tts_provider() == 'gpt-sovits' and settings.gpt_sovits_adaptation_enabled:
+                voice_adaptation.enqueue(c, vid)
     except Exception:
         path.unlink(missing_ok=True)
         if reference_path != path:
@@ -3019,12 +3243,42 @@ async def clone_voice(sample: UploadFile = File(...), aux_samples: List[UploadFi
         "warmed": False,
         "quality": quality,
         "prompt_advice": prompt_advice,
-        "quality_hint": "样本格式已通过，正在进行真实语音合成验收；验收通过后才可试听和播报。参考文本必须与主参考录音逐字一致，额外参考音频仅用于增强音色稳定性",
+        "quality_hint": ("样本已保存，正在排队训练此音色的专属权重；训练目标约 30 秒，排队和合成验收另计。辅助录音仅在填写对应原文后参与训练，相似度需试听确认。"
+                         if _tts_provider() == 'gpt-sovits' and settings.gpt_sovits_adaptation_enabled
+                         else "样本已保存，正在进行实际合成验收；通过后才可试听和播报。"),
     }
+
+
+@app.post('/api/voices/{voice_id}/adapt')
+def adapt_voice(voice_id: str):
+    if voice_id in PRESET_VOICES or _tts_provider() != 'gpt-sovits':
+        raise HTTPException(400, '仅支持 GPT-SoVITS 克隆音色')
+    if not settings.gpt_sovits_adaptation_enabled:
+        raise HTTPException(503, '专属音色训练已关闭')
+    voice_adaptation.assert_editable(voice_id)
+    with conn() as c:
+        row = c.execute('SELECT * FROM voices WHERE id=?', (voice_id,)).fetchone()
+        if not row or not row['reference_path']:
+            raise HTTPException(404, '克隆音色不存在')
+        if voice_id in VOICE_CALIBRATING or voice_id in VOICE_CALIBRATION_QUEUE:
+            raise HTTPException(409, '该音色正在校准，请完成后再训练')
+        voice_adaptation.enqueue(c, voice_id)
+    VOICE_WARMED.discard(voice_id)
+    threading.Thread(target=_warm_single_voice, args=(voice_id,), daemon=True).start()
+    return {'id': voice_id, 'status': 'queued'}
+
+
+@app.post('/api/voices/{voice_id}/adapt/rollback')
+def rollback_voice_adaptation(voice_id: str):
+    voice_adaptation.rollback(voice_id)
+    VOICE_WARMED.discard(voice_id)
+    threading.Thread(target=_warm_single_voice, args=(voice_id,), daemon=True).start()
+    return {'id': voice_id, 'status': 'pending'}
 
 
 @app.post("/api/voices/{voice_id}/optimize")
 def optimize_voice(voice_id: str):
+    voice_adaptation.assert_editable(voice_id)
     if voice_id in PRESET_VOICES:
         raise HTTPException(403, '内置主播声音固定，不能通过克隆管理修改或删除')
     with conn() as c:
@@ -3056,12 +3310,13 @@ def optimize_voice(voice_id: str):
         )
     VOICE_WARMED.discard(voice_id)
     threading.Thread(target=_warm_single_voice, args=(voice_id,), name=f"warm-voice-{voice_id}", daemon=True).start()
-    quality = _audio_quality(str(reference_path))
+    quality = _reference_quality(reference_path)
     return {"id": voice_id, "reference_audio": reference_path.name, "reference_count": 1 + len(optimized_aux), "quality": quality, "prompt_advice": _prompt_alignment(prompt_text, quality.get("duration")), "warming": True, "warmed": False, "status": "ready"}
 
 
 @app.delete("/api/voices/{voice_id}")
 def delete_voice(voice_id: str):
+    voice_adaptation.assert_editable(voice_id)
     if voice_id in PRESET_VOICES:
         raise HTTPException(403, '内置主播声音固定，不能通过克隆管理修改或删除')
     with conn() as c:
@@ -3085,12 +3340,13 @@ def delete_voice(voice_id: str):
 
 @app.patch("/api/voices/{voice_id}")
 def update_voice(voice_id: str, update: VoiceUpdate):
+    voice_adaptation.assert_editable(voice_id)
     if voice_id in PRESET_VOICES:
         raise HTTPException(403, '内置主播声音固定，不能通过克隆管理修改或删除')
     changes = update.model_dump(exclude_none=True)
     if not changes:
         raise HTTPException(400, "没有需要更新的内容")
-    allowed = {"name", "style", "prompt_text", "prompt_lang"}
+    allowed = {"name", "style", "prompt_text", "prompt_lang", "prompt_policy"}
     changes = {key: value for key, value in changes.items() if key in allowed}
     prompt_changed = False
     with conn() as c:
@@ -3113,7 +3369,7 @@ def update_voice(voice_id: str, update: VoiceUpdate):
                 "synthesis_status='pending',synthesis_message='参考文本已更新，正在重新进行实际合成验收',synthesis_duration=NULL WHERE id=?",
                 (voice_id,),
             )
-        saved = c.execute("SELECT id,name,style,prompt_text,prompt_lang FROM voices WHERE id=?", (voice_id,)).fetchone()
+        saved = c.execute("SELECT id,name,style,prompt_text,prompt_lang,prompt_policy FROM voices WHERE id=?", (voice_id,)).fetchone()
     result = dict(saved)
     if prompt_changed:
         VOICE_WARMED.discard(voice_id)
@@ -3214,38 +3470,6 @@ def test_qa():
 @app.post("/api/tests/tts")
 def test_tts():
     _ensure_tts_ready()
-    if _tts_provider() == "idextts2":
-        samples = ["欢迎来到汽车直播间。", "今天为大家介绍这款车型的续航和智能配置。", "如果你想了解购车政策，可以在评论区留言。"]
-        voice_id = _preferred_clone_voice_id()
-        reference_audio, _prompt_text, _prompt_lang = _voice_config(voice_id)
-        latencies = []
-        sample_results = []
-        with _foreground_ticket():
-            for sample in samples:
-                start = time.perf_counter()
-                try:
-                    with _tts_lock(priority="foreground"):
-                        audio = INDEX_TTS2_ENGINE.synthesize(text=normalize_tts_text(sample), reference_audio=reference_audio)
-                    if len(audio) <= 128:
-                        raise RuntimeError("未收到可播放音频数据")
-                    latency = round((time.perf_counter() - start) * 1000, 1)
-                    latencies.append(latency)
-                    sample_results.append({"text": sample, "first_audio_ms": latency, "ok": True})
-                except Exception as exc:
-                    latencies.append(None)
-                    sample_results.append({"text": sample, "first_audio_ms": None, "ok": False, "error": str(exc)[:200]})
-        valid = [x for x in latencies if x is not None]
-        return {
-            "provider": "idextts2",
-            "samples": len(samples),
-            "voice_id": voice_id,
-            "sample_results": sample_results,
-            "latencies_ms": latencies,
-            "first_audio_latencies_ms": latencies,
-            "average_first_audio_ms": round(sum(valid) / len(valid), 1) if valid else None,
-            "average_ms": round(sum(valid) / len(valid), 1) if valid else None,
-            "meets_target": bool(valid and sum(valid) / len(valid) < 3000),
-        }
     if not TTS_WARMUP.is_set() or VOICE_WARMING:
         raise HTTPException(503, "TTS 模型或音色仍在预热，请等待启动脚本提示服务就绪后再验收")
     samples = ["欢迎来到汽车直播间。", "今天为大家介绍这款车型的续航和智能配置。", "如果你想了解购车政策，可以在评论区留言。"]

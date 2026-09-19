@@ -1,0 +1,95 @@
+# Deployment Package Exclusions
+# Files and directories to exclude when creating deployment package
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Environment and secrets
+backend/.env
+.env
+.env.local
+
+# Runtime data
+data/car_live.db
+data/*.rag-index/
+data/uploads/
+data/voice_models/
+data/uploads/documents/
+
+# RAG models are bundled with the repository; do not exclude models/rag.
+
+# Local evidence and private material
+artifacts/
+.trash/
+_docx_review/
+submission/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+
+# Node modules (install on target)
+node_modules/
+frontend/node_modules/
+
+# Build outputs
+frontend/dist/
+backend/dist/
+
+# Test artifacts and old reports
+artifacts/acceptance-*/
+artifacts/implementation-*/
+artifacts/rag-upgrade-*/
+ACCEPTANCE_CHECKLIST.md
+CONNECTION_FIX.md
+DIALOG_STYLE_FIX.md
+FINAL_*.md
+OPTIMIZATION_*.md
+PERFORMANCE_*.md
+QUICK_FIX_GUIDE.md
+ROOT_CAUSE_FOUND.md
+SCRIPT_INPUT_OPTIMIZATION.md
+SERVICE_OFFLINE_FIX.md
+SUMMARY.md
+SWITCH_VERIFICATION.md
+TTS_*.md
+
+# Large binary files
+*.bin
+*.TAG
+
+# Documentation (optional, keep essential ones)
+# Keep: README.md, DEPLOYMENT.md, docs/
+
+# Audio and model weights. Preserve the tracked built-in voice references.
+*.wav
+!data/preset_voices/*.wav
+*.mp3
+*.m4a
+*.ogg
+*.ckpt
+*.pth

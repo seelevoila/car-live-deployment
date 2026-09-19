@@ -1,5 +1,24 @@
 (function(root) {
   const SCRIPT = '大家好，欢迎来到直播间。今天一起了解这款车，看看它有哪些亮点。';
+  const SCRIPTS = [SCRIPT, '选车要看日常需求。无论城市通勤还是周末出游，舒适和安全都很重要。'];
+  const CAPTURE_AUDIO = {channelCount:1, echoCancellation:false, noiseSuppression:false, autoGainControl:false};
+
+  function recordingLevels(samples) {
+    let peak=0, energy=0;
+    for (const sample of samples) { peak=Math.max(peak,Math.abs(sample));energy+=sample*sample; }
+    return {peakDb:20*Math.log10(Math.max(peak,1e-10)), rmsDb:20*Math.log10(Math.max(Math.sqrt(energy/Math.max(1,samples.length)),1e-10))};
+  }
+
+  function normalizeRecording(samples) {
+    const before=recordingLevels(samples);
+    // Align speech energy while retaining -3 dBFS peak headroom. The backend
+    // applies the catalog's measured RMS target with lookahead peak protection.
+    const gainDb=Math.min(-20-before.rmsDb,-3-before.peakDb);
+    const gain=Math.pow(10,gainDb/20);
+    const normalized=Float32Array.from(samples,value=>value*gain);
+    return {samples:normalized,before,after:recordingLevels(normalized),gainDb,
+      level:before.peakDb>-1?'偏高':before.rmsDb<-24?'偏低':'合适'};
+  }
 
   function encodeWav(samples, rate = 24000) {
     const buffer = new ArrayBuffer(44 + samples.length * 2);
@@ -13,7 +32,7 @@
     text(36, 'data'); view.setUint32(40, samples.length * 2, true);
     samples.forEach((value, index) => {
       const clipped = Math.max(-1, Math.min(1, value));
-      view.setInt16(44 + index * 2, Math.round(clipped * (clipped < 0 ? 32768 : 32767)), true);
+      view.setInt16(44 + index * 2, Math.sign(clipped) * Math.round(Math.abs(clipped) * 32767), true);
     });
     return buffer;
   }
@@ -33,15 +52,19 @@
       <div class="capture-tabs" role="tablist" aria-label="克隆方式"><button class="btn secondary" id="captureUploadTab" type="button" role="tab" aria-selected="true" aria-controls="captureUpload">上传音频</button><button class="btn secondary" id="captureRecordTab" type="button" role="tab" aria-selected="false" aria-controls="captureRecord">麦克风录制</button></div>
       <div id="captureUpload" role="tabpanel" aria-labelledby="captureUploadTab" class="capture-upload-grid">
         <label>主参考音频<input id="voiceFile" type="file" accept=".wav,.mp3,.flac,.ogg,.m4a"><small id="voiceFileMeta" class="hint">建议 5-10 秒，最低 3 秒；主参考音频必须填写对应原文</small></label>
-        <label>辅助参考音频（可选）<input id="voiceAuxFiles" type="file" multiple accept=".wav,.mp3,.flac,.ogg,.m4a"><small id="voiceAuxMeta" class="hint">最多 2 条；同一说话人的不同句子，不需要填写文字</small></label>
+        <label>辅助参考音频（可选）<input id="voiceAuxFiles" type="file" multiple accept=".wav,.mp3,.flac,.ogg,.m4a"><small id="voiceAuxMeta" class="hint">最多 2 条；填写对应原文后参与专属训练，留空仅作参考</small></label>
+        <label id="voiceAuxPromptRow0" hidden><span id="voiceAuxPromptLabel0">辅助录音 1 原文</span><input id="voiceAuxPrompt0" maxlength="500" placeholder="与第一条辅助录音逐字一致；可留空"></label>
+        <label id="voiceAuxPromptRow1" hidden><span id="voiceAuxPromptLabel1">辅助录音 2 原文</span><input id="voiceAuxPrompt1" maxlength="500" placeholder="与第二条辅助录音逐字一致；可留空"></label>
         <label class="capture-transcript">参考文本（必填）<input id="voicePrompt" maxlength="500" placeholder="填写主参考音频中实际说出的原文，须逐字一致"><small id="voicePromptMeta" class="hint">至少 4 个字；标点和停顿也尽量保持一致</small></label>
       </div>
       <div id="captureRecord" role="tabpanel" aria-labelledby="captureRecordTab" hidden>
-        <p class="hint">点击开始录音后，用平时介绍产品的语气完整朗读下方文字，约 5～10 秒。录完可先回听，再创建音色。</p>
+        <p class="hint">分别朗读两段不同文案，每段约 5～10 秒，保持同一人、相同距离和语气。第一段为主参考，第二段为辅助参考；也可只用第一段创建。录音关闭自动增益、降噪和回声消除，请使用耳机并保持环境安静。</p>
+        <div class="controls"><button class="btn secondary" id="recordPart0" type="button" aria-pressed="true">第一段 · 主参考</button><button class="btn secondary" id="recordPart1" type="button" aria-pressed="false">第二段 · 辅助参考</button></div>
         <blockquote class="record-script" id="recordScript">${SCRIPT}</blockquote>
         <div class="controls"><button class="btn" id="recordStart" type="button">开始录音</button><button class="btn secondary" id="recordStop" type="button" disabled>结束录音</button><output id="recordTimer" aria-label="录音时长">0.0 / 10 秒</output></div>
         <p id="recordStatus" role="status" aria-live="polite" class="hint">参考文本会自动使用上方朗读文案；录音仅在你检查样本或创建音色时上传。</p>
         <audio id="recordPreview" controls hidden aria-label="回听我的录音"></audio>
+        <p id="recordLevel" class="hint" role="status"></p><p id="recordPartsStatus" class="hint">主参考：未录制；辅助参考：未录制</p>
       </div>
     </div>`;
   }
@@ -49,6 +72,8 @@
   function mount(container, {onBusy = () => {}, beforeRecord = () => {}} = {}) {
     let mode = 'upload', file = null, duration = 0, stream = null, recorder = null;
     let timer = null, deadline = null, url = null, generation = 0, disposed = false;
+    let part=0;
+    const recordings=[null,null];
     const $ = selector => container.querySelector(selector);
     const status = message => { if (!disposed) $('#recordStatus').textContent = message; };
     const stopTracks = () => { stream?.getTracks().forEach(track => track.stop()); stream = null; };
@@ -56,13 +81,29 @@
     const busy = value => {
       if (disposed) return;
       $('#recordStart').disabled = value;
+      $('#recordPart0').disabled = $('#recordPart1').disabled = value;
       onBusy(value);
     };
     function discard() {
+      if(recordings[part]?.url) URL.revokeObjectURL(recordings[part].url);
+      recordings[part]=null;
       file = null; duration = 0;
       const player = $('#recordPreview'); player.pause(); player.removeAttribute('src'); player.hidden = true;
-      if (url) URL.revokeObjectURL(url);
       url = null;
+    }
+    function showPart(index) {
+      cancel();part=index;
+      const saved=recordings[part];
+      file=saved?.file||null;duration=saved?.duration||0;url=saved?.url||null;
+      $('#recordScript').textContent=SCRIPTS[part];
+      $('#recordPart0').setAttribute('aria-pressed',String(part===0));
+      $('#recordPart1').setAttribute('aria-pressed',String(part===1));
+      const player=$('#recordPreview');player.pause();player.hidden=!url;
+      if(url)player.src=url;else player.removeAttribute('src');
+      $('#recordStart').textContent=file?'重新录制':'开始录音';
+      $('#recordLevel').textContent=saved?.levelText||'';
+      $('#recordPartsStatus').textContent=`主参考：${recordings[0]?'已录制':'未录制'}；辅助参考：${recordings[1]?'已录制':'未录制'}`;
+      status(file?'本段录音已保存，请回听确认原文一致。':'完整朗读本段文案，录音结束后可切换另一段。');
     }
     function cancel() {
       generation++; clearTimers();
@@ -87,9 +128,11 @@
       }
       busy(true); status('正在请求麦克风权限，请在浏览器提示中允许使用。');
       try {
-        const input = await navigator.mediaDevices.getUserMedia({audio:{channelCount:1, echoCancellation:true, noiseSuppression:true}, video:false});
+        const input = await navigator.mediaDevices.getUserMedia({audio:{...CAPTURE_AUDIO}, video:false});
         if (disposed || token !== generation) { input.getTracks().forEach(track => track.stop()); return; }
         stream = input;
+        const actualCapture = stream.getAudioTracks()[0]?.getSettings?.() || {};
+        const processingStillActive = ['echoCancellation','noiseSuppression','autoGainControl'].some(key => actualCapture[key] === true);
         const mimeType = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'].find(type => MediaRecorder.isTypeSupported(type));
         const active = new MediaRecorder(stream, mimeType ? {mimeType} : {});
         recorder = active;
@@ -110,10 +153,15 @@
             if (disposed || token !== generation) return;
             const samples = converted.getChannelData(0);
             duration = validateRecording(samples, 24000);
-            file = new File([encodeWav(samples)], 'microphone-reference.wav', {type:'audio/wav'});
+            const aligned=normalizeRecording(samples);
+            file = new File([encodeWav(aligned.samples)], `microphone-reference-${part+1}.wav`, {type:'audio/wav'});
             url = URL.createObjectURL(file); $('#recordPreview').src = url; $('#recordPreview').hidden = false;
+            const levelText=`录音电平：${aligned.level}；RMS ${aligned.before.rmsDb.toFixed(1)} → ${aligned.after.rmsDb.toFixed(1)} dBFS，峰值 ${aligned.before.peakDb.toFixed(1)} → ${aligned.after.peakDb.toFixed(1)} dBFS。`;
+            recordings[part]={file,duration,url,levelText,captureSettings:actualCapture};
+            $('#recordLevel').textContent=levelText;
+            $('#recordPartsStatus').textContent=`主参考：${recordings[0]?'已录制':'未录制'}；辅助参考：${recordings[1]?'已录制':'未录制'}`;
             $('#recordStart').textContent = '重新录制';
-            status(`已录制 ${duration.toFixed(1)} 秒。请回听确认完整读完上方文案；读错或未读完可重新录制。`);
+            status(`已录制 ${duration.toFixed(1)} 秒。请回听确认完整读完上方文案；读错或未读完可重新录制。${processingStillActive ? '浏览器仍启用麦克风语音处理，可改用原始录音上传作对照。' : ''}`);
           } catch (error) { if (token === generation) { file = null; status(error.message || '录音处理失败，请重新录制。'); } }
           finally { if (decoder) await decoder.close(); if (token === generation) busy(false); }
         };
@@ -137,15 +185,22 @@
     $('#captureRecordTab').onclick = () => selectMode('record');
     $('#recordStart').onclick = start;
     $('#recordStop').onclick = () => { if (recorder?.state === 'recording') recorder.stop(); };
+    $('#recordPart0').onclick=()=>showPart(0);
+    $('#recordPart1').onclick=()=>showPart(1);
     return {
       sample() {
-        if (mode === 'record') return {file, prompt:SCRIPT, auxiliary:[], duration, mode};
-        return {file:$('#voiceFile').files[0], prompt:$('#voicePrompt').value.trim(), auxiliary:[...$('#voiceAuxFiles').files], duration:Number($('#voiceFile').dataset.duration || 0), mode};
+        if (mode === 'record') return {file:recordings[0]?.file||null, prompt:SCRIPTS[0],
+          auxiliary:recordings[1]?[recordings[1].file]:[], auxiliaryPrompts:recordings[1]?[SCRIPTS[1]]:[],
+          duration:recordings[0]?.duration||0, captureSettings:recordings.map(item => item?.captureSettings || null), mode};
+        const auxiliary = [...$('#voiceAuxFiles').files];
+        return {file:$('#voiceFile').files[0], prompt:$('#voicePrompt').value.trim(), auxiliary,
+          auxiliaryPrompts:auxiliary.map((_,index)=>$('#voiceAuxPrompt'+index)?.value.trim() || ''),
+          duration:Number($('#voiceFile').dataset.duration || 0), mode};
       },
-      dispose() { cancel(); discard(); disposed = true; },
+      dispose() { cancel();for(const saved of recordings)if(saved?.url)URL.revokeObjectURL(saved.url);recordings.fill(null);disposed = true; },
     };
   }
-  const api = {SCRIPT, markup, mount, encodeWav, validateRecording};
+  const api = {SCRIPT, SCRIPTS, CAPTURE_AUDIO, markup, mount, encodeWav, validateRecording, normalizeRecording, recordingLevels};
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VoiceRecorder = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -77,34 +77,84 @@ function Wait-ListeningPort([int]$port, [int]$seconds = 12) {
   return $false
 }
 
-$ffmpeg='C:\Program Files\CanMV IDE K230\share\qtcreator\ffmpeg\windows\bin'
-if(Test-Path $ffmpeg){$env:Path="$ffmpeg;$env:Path"}
 $python=@(
   (Join-Path $root '.venv\Scripts\python.exe'),
   (Join-Path $root 'backend\.venv\Scripts\python.exe')
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-$gptRoot=Join-Path (Split-Path $root) 'GPT-SoVITS'
+# Auto-detect GPT-SoVITS root from environment or standard locations
+$gptRoot = $env:GPT_SOVITS_ROOT
+if (-not $gptRoot) {
+  $candidates = @(
+    'GPT-SoVITS-v2pro-20250604',
+    'GPT-SoVITS',
+    'gpt-sovits'
+  ) | ForEach-Object { Join-Path (Split-Path $root) $_ }
+  $gptRoot = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+}
 $nltkData=Join-Path $gptRoot 'nltk_data'
 if(Test-Path $nltkData){$env:NLTK_DATA=$nltkData}
-$gptPython=Join-Path $gptRoot '.venv\Scripts\python.exe'
-$gptConfig=Join-Path $gptRoot 'GPT_SoVITS\pretrained_models\v2Pro\s2Gv2ProPlus.pth'
+# New package layout: runtime\python.exe (not .venv\Scripts\python.exe)
+$gptPython = @(
+  (Join-Path $gptRoot 'runtime\python.exe'),
+  (Join-Path $gptRoot '.venv\Scripts\python.exe'),
+  (Join-Path $gptRoot '.venv\bin\python')
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+$gptConfig=Join-Path $gptRoot 'GPT_SoVITS\configs\tts_infer.yaml'
 $baseGpt=Join-Path $gptRoot 'GPT_SoVITS\pretrained_models\s1v3.ckpt'
 $baseSovits=Join-Path $gptRoot 'GPT_SoVITS\pretrained_models\v2Pro\s2Gv2ProPlus.pth'
 $gptAvailable=$false
-if((Test-Path $gptPython) -and (Test-Path $gptConfig)) {
+if($gptPython -and (Test-Path $gptConfig)) {
   $gptRequired=@(
-    $gptConfig,
-    (Join-Path $gptRoot 'GPT_SoVITS\pretrained_models\s1v3.ckpt'),
+    $baseGpt,
+    $baseSovits,
     (Join-Path $gptRoot 'GPT_SoVITS\pretrained_models\v2Pro\s2Dv2Pro.pth'),
     (Join-Path $gptRoot 'GPT_SoVITS\pretrained_models\sv\pretrained_eres2netv2w24s4ep4.ckpt')
   )
   $gptAvailable=(($gptRequired | Where-Object { -not (Test-Path $_) }).Count -eq 0)
   if(-not $gptAvailable){
     Write-Warning 'GPT-SoVITS files are incomplete; skipping the optional local GPT-SoVITS process.'
+  } else {
+    # Verify tts_infer.yaml custom section points to existing weights
+    $yamlContent = Get-Content $gptConfig -Raw
+    if ($yamlContent -match 't2s_weights_path:\s*(.+)') {
+      $t2sRelPath = $matches[1].Trim()
+      # Check if path is absolute or relative
+      if ([System.IO.Path]::IsPathRooted($t2sRelPath)) {
+        $t2sPath = $t2sRelPath
+      } else {
+        $t2sPath = Join-Path $gptRoot $t2sRelPath
+      }
+      if (-not (Test-Path $t2sPath)) {
+        Write-Warning "Custom t2s_weights_path not found: $t2sPath. Backing up and fixing config..."
+        Copy-Item $gptConfig "$gptConfig.bak.$(Get-Date -Format yyyyMMddHHmmss)"
+        $yamlContent = $yamlContent -replace 't2s_weights_path:\s*.+', "t2s_weights_path: GPT_SoVITS/pretrained_models/s1v3.ckpt"
+        $yamlContent = $yamlContent -replace 'vits_weights_path:\s*.+', "vits_weights_path: GPT_SoVITS/pretrained_models/v2Pro/s2Gv2ProPlus.pth"
+        $yamlContent | Set-Content $gptConfig -NoNewline
+        Write-Output "Fixed tts_infer.yaml to use base weights"
+      }
+    }
   }
 }
-if($gptAvailable -and -not (Assert-PortOwner 9880 $gptPython 'api_v2.py' 'GPT-SoVITS')){
-  Start-Process -FilePath $gptPython -ArgumentList 'api_v2.py','-a','127.0.0.1','-p','9880','-c','GPT_SoVITS/configs/tts_infer.yaml' -WorkingDirectory $gptRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $root 'gpt-runtime.log') -RedirectStandardError (Join-Path $root 'gpt-runtime-error.log')
+$gptLauncher=Join-Path $root 'scripts\gpt_sovits_api.py'
+if($gptAvailable){
+  # Upgrade an already running project api_v2.py process in place. Without
+  # this, the launcher would reject its own old process as a foreign port
+  # owner and the reference-cache/streaming fix would never take effect.
+  foreach($process in @(Get-ListeningProcesses 9881)) {
+    $commandLine = [string]$process.CommandLine
+    if($commandLine -like "*$gptRoot*" -and $commandLine -match 'api_v2\.py') {
+      Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+  }
+  for($i = 0; $i -lt 40 -and (Test-ListeningPort 9881); $i++) {
+    Start-Sleep -Milliseconds 250
+  }
+  if(-not (Assert-PortOwner 9881 $gptPython $gptLauncher 'GPT-SoVITS')){
+  # This entry point installs reference caching and bounded streaming chunks.
+  # Starting api_v2.py directly silently bypasses both latency optimizations.
+  $gptArguments=@(('"' + $gptLauncher + '"'),'--gpt-root',('"' + $gptRoot + '"'),'-a','127.0.0.1','-p','9881','-c','GPT_SoVITS/configs/tts_infer.yaml')
+  Start-Process -FilePath $gptPython -ArgumentList $gptArguments -WorkingDirectory $gptRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $root 'gpt-runtime.log') -RedirectStandardError (Join-Path $root 'gpt-runtime-error.log')
+  }
 }
 if(-not(Test-Path $python)){throw '请先执行 python -m venv .venv，并安装 backend\requirements.txt'}
 if(-not (Assert-PortOwner 8000 $python '-m uvicorn app.main:app' '后端')){
@@ -118,24 +168,12 @@ if(-not (Wait-ListeningPort 5173)){ throw '前端 5173 端口未能启动，请�
 if($gptAvailable) {
   # The web UI and API are usable while the GPU model is still loading. Do not
   # make a slow model warmup take the whole application offline after reboot.
-  if(-not (Wait-ListeningPort 9880 180)){
-    Write-Warning 'GPT-SoVITS 9880 is still loading; the browser fallback remains available.'
+  if(-not (Wait-ListeningPort 9881 180)){
+    Write-Warning 'GPT-SoVITS 9881 is still loading; the browser fallback remains available.'
   } else {
-    # GPT-SoVITS stores the active weights globally. Always start from the
-    # v2ProPlus base pair; the backend switches to the Xilian fine-tune only for
-    # the Xilian voice record, under the TTS inference lock.
-    if((Test-Path $baseGpt) -and (Test-Path $baseSovits)) {
-      $baseWeightsLoaded=$false
-      for($i = 0; $i -lt 60; $i++) {
-        try {
-          Invoke-RestMethod -UseBasicParsing -Uri 'http://127.0.0.1:9880/set_gpt_weights' -Method Get -Body @{weights_path=$baseGpt} | Out-Null
-          Invoke-RestMethod -UseBasicParsing -Uri 'http://127.0.0.1:9880/set_sovits_weights' -Method Get -Body @{weights_path=$baseSovits} | Out-Null
-          $baseWeightsLoaded=$true
-          break
-        } catch { Start-Sleep -Seconds 2 }
-      }
-      if(-not $baseWeightsLoaded){ Write-Warning 'v2ProPlus base weights could not be loaded; backend will retry on first synthesis.' }
-    }
+    # The backend owns weight changes under its inference lock and recognizes
+    # weights already loaded by the runtime. Reloading them here races startup
+    # warmup, discards its reference cache and delays the first live request.
     if($NoWaitTts){
       Write-Output 'GPT-SoVITS is starting in the background; browser speech is available during warmup.'
     } else {

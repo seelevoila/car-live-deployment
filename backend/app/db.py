@@ -80,6 +80,7 @@ def init_db():
             ('voices', 'prompt_text', "TEXT DEFAULT ''"),
             ('voices', 'prompt_lang', "TEXT DEFAULT 'zh'"),
             ('voices', 'aux_reference_paths', "TEXT DEFAULT '[]'"),
+            ('voices', 'aux_prompt_texts', "TEXT DEFAULT '[]'"),
             ('voices', 'validated_aux_reference_paths', 'TEXT'),
             ('voices', 'sampling_seed', 'INTEGER'),
             ('voices', 'sampling_top_k', 'INTEGER'),
@@ -87,6 +88,10 @@ def init_db():
             ('voices', 'sampling_temperature', 'REAL'),
             ('voices', 'sampling_model_version', 'TEXT'),
             ('voices', 'calibration_details', 'TEXT'),
+            ('voices', 'calibration_status', "TEXT DEFAULT 'idle'"),
+            ('voices', 'calibration_message', "TEXT DEFAULT ''"),
+            ('voices', 'calibration_checked_at', 'TEXT'),
+            ('voices', 'prompt_policy', "TEXT DEFAULT 'off'"),
             ('voices', 'synthesis_status', "TEXT DEFAULT 'ready'"),
             ('voices', 'synthesis_message', "TEXT DEFAULT ''"),
             ('voices', 'synthesis_duration', 'REAL'),
@@ -95,20 +100,17 @@ def init_db():
             ('sessions', 'voice_id', "TEXT DEFAULT 'browser-default'"),
         ]:
             _add_column(c, table, column, definition)
-        # Older databases predate per-voice model routing.  Only the trained
-        # Xilian records should retain the fine-tuned weights; every other
-        # uploaded sample must use the v2ProPlus base model.
-        c.execute(
-            "UPDATE voices SET model_profile='xilian' WHERE model_profile='base' AND "
-            "(id IN ('voice-f42877922900','voice-fac38ad29932') OR "
-            "reference_path LIKE '%07c2ddaa9e9c48b38effbbe6713386f8%' OR "
-            "reference_path LIKE '%5aef24da46e84719b2629ab0f7d04840%')"
-        )
         c.execute(
             'INSERT OR IGNORE INTO voices(id,name,style,provider,created_at) VALUES(?,?,?,?,?)',
             ('browser-default', '系统默认', '自然', 'browser', now()),
         )
         install_presets(c, now())
+        c.execute('''CREATE TABLE IF NOT EXISTS voice_adaptations(
+            voice_id TEXT PRIMARY KEY REFERENCES voices(id) ON DELETE CASCADE,
+            job_id TEXT UNIQUE NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL,
+            previous_profile TEXT NOT NULL, source_signature TEXT NOT NULL,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL, report TEXT DEFAULT '{}'
+        )''')
         c.executescript('''
           CREATE TABLE IF NOT EXISTS analytics_events(
             id TEXT PRIMARY KEY,kind TEXT NOT NULL,created_at TEXT NOT NULL,vehicle TEXT DEFAULT '',

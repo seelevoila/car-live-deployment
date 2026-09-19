@@ -1,0 +1,634 @@
+{
+  "generated_at": "2026-08-28T11:50:53+08:00",
+  "project_root": "C:\\Users\\seele\\Desktop\\test",
+  "git": {
+    "branch": "codex/xilian-joint-e6-baseline",
+    "commit": "6b7de21498ab21ade29ffa93c7598fb3cca33261",
+    "status": "M backend/app/main.py\n M backend/tests/test_stability.py\n M docs/ACCEPTANCE.md\n M docs/COMPETITION_SUBMISSION.md\n M frontend/app.js\n?? artifacts/\n?? docx_extract.txt\n?? submission/"
+  },
+  "health": {
+    "status": "ok",
+    "service": "汽车直播智能体",
+    "version": "0.3.0"
+  },
+  "tts_status": {
+    "provider": "gpt-sovits",
+    "ready": true,
+    "configured": true,
+    "reachable": true,
+    "cloned_voices": 6,
+    "endpoint": "http://127.0.0.1:9880",
+    "model_version": "v2ProPlus",
+    "streaming": true,
+    "stream_mode": "pcm-wav-natural",
+    "streaming_mode": 1,
+    "active_model_profile": "base",
+    "model_profiles": [
+      "base",
+      "xilian"
+    ],
+    "warming_up": false,
+    "warmed_voice_ids": [
+      "voice-211bac518fea",
+      "voice-39fdc1b4a65b",
+      "voice-8467c334ed5b",
+      "voice-929ae22d0023",
+      "voice-9b8ba1bffad5",
+      "voice-f42877922900"
+    ]
+  },
+  "retrieval": {
+    "total": 40,
+    "passed": 40,
+    "failed": 0,
+    "accuracy": 100.0,
+    "average_latency_ms": 7.9,
+    "meets_target": true,
+    "sample_target": true,
+    "failures": []
+  },
+  "qa": {
+    "total": 40,
+    "passed": 40,
+    "failed": 0,
+    "accuracy": 100.0,
+    "average_latency_ms": 8.1,
+    "target": 85,
+    "sample_target": true,
+    "meets_target": true,
+    "provider": "local-structured-extractive",
+    "failures": []
+  },
+  "tts": {
+    "samples": 3,
+    "voice_id": "voice-8467c334ed5b",
+    "sample_results": [
+      {
+        "text": "欢迎来到汽车直播间。",
+        "first_audio_ms": 2266.4,
+        "ok": true
+      },
+      {
+        "text": "今天为大家介绍这款车型的续航和智，",
+        "first_audio_ms": 2615.9,
+        "ok": true
+      },
+      {
+        "text": "如果你想了解购车政策，",
+        "first_audio_ms": 2086.6,
+        "ok": true
+      }
+    ],
+    "latencies_ms": [
+      2266.4,
+      2615.9,
+      2086.6
+    ],
+    "first_audio_latencies_ms": [
+      2266.4,
+      2615.9,
+      2086.6
+    ],
+    "average_ms": 2323.0,
+    "average_first_audio_ms": 2323.0,
+    "first_audio_target_ms": 3000,
+    "meets_target": true
+  },
+  "voices": [
+    {
+      "id": "voice-8467c334ed5b",
+      "name": "我的主播",
+      "style": "亲民",
+      "provider": "gpt-sovits",
+      "prompt_text": "正是像停云小姐这样的接渡使往来周旋，仙舟的贸易才能有如今的繁盛。",
+      "prompt_lang": "zh",
+      "model_profile": "base",
+      "created_at": "2026-08-26T16:56:17.954067+08:00",
+      "cloned": 1,
+      "quality": {
+        "status": "ready",
+        "message": "标准 PCM WAV",
+        "duration": 6.31,
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 24000,
+        "active_ratio": 0.826,
+        "silence_ratio": 0.104,
+        "longest_silence": 0.28,
+        "clipped_ratio": 0.0,
+        "rms_db": -18.4,
+        "peak_db": -2.7
+      },
+      "reference_count": 2,
+      "uploaded_reference_count": 3,
+      "prompt_advice": {
+        "status": "ok",
+        "message": "参考文本长度与录音时长匹配",
+        "chars_per_second": 4.75
+      },
+      "warmed": true,
+      "calibrating": false,
+      "sampling_calibrated": true,
+      "sampling_profile": {
+        "top_p": 1.0,
+        "temperature": 1.0,
+        "repetition_penalty": 1.3,
+        "calibrated": true
+      },
+      "prosody_advice": "已联合校准音色相似度与语气稳定性",
+      "warming": false,
+      "profile": {}
+    },
+    {
+      "id": "voice-9b8ba1bffad5",
+      "name": "桑博",
+      "style": "亲民",
+      "provider": "gpt-sovits",
+      "prompt_text": "今天要干什么？有钱我就干，没钱…也行，只要你开口，伙计。",
+      "prompt_lang": "zh",
+      "model_profile": "base",
+      "created_at": "2026-08-26T15:12:52.136747+08:00",
+      "cloned": 1,
+      "quality": {
+        "status": "ready",
+        "message": "标准 PCM WAV",
+        "duration": 6.02,
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 24000,
+        "active_ratio": 0.887,
+        "silence_ratio": 0.046,
+        "longest_silence": 0.12,
+        "clipped_ratio": 0.0,
+        "rms_db": -16.7,
+        "peak_db": -2.9
+      },
+      "reference_count": 2,
+      "uploaded_reference_count": 3,
+      "prompt_advice": {
+        "status": "ok",
+        "message": "参考文本长度与录音时长匹配",
+        "chars_per_second": 3.65
+      },
+      "warmed": true,
+      "calibrating": false,
+      "sampling_calibrated": true,
+      "sampling_profile": {
+        "top_p": 0.9,
+        "temperature": 0.75,
+        "repetition_penalty": 1.3,
+        "calibrated": true
+      },
+      "prosody_advice": "参考录音语气起伏较强，已自动采用更稳定的合成参数",
+      "warming": false,
+      "profile": {}
+    },
+    {
+      "id": "voice-39fdc1b4a65b",
+      "name": "阿格莱雅",
+      "style": "亲民",
+      "provider": "gpt-sovits",
+      "prompt_text": "我们会重逢的，朋友。无论你行向何处，奥赫玛的大门始终为英雄敞开。",
+      "prompt_lang": "zh",
+      "model_profile": "base",
+      "created_at": "2026-08-26T12:33:06.663941+08:00",
+      "cloned": 1,
+      "quality": {
+        "status": "ready",
+        "message": "标准 PCM WAV",
+        "duration": 6.12,
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 24000,
+        "active_ratio": 0.809,
+        "silence_ratio": 0.131,
+        "longest_silence": 0.2,
+        "clipped_ratio": 0.0,
+        "rms_db": -18.4,
+        "peak_db": -3.0
+      },
+      "reference_count": 2,
+      "uploaded_reference_count": 3,
+      "prompt_advice": {
+        "status": "ok",
+        "message": "参考文本长度与录音时长匹配",
+        "chars_per_second": 4.58
+      },
+      "warmed": true,
+      "calibrating": false,
+      "sampling_calibrated": true,
+      "sampling_profile": {
+        "top_p": 1.0,
+        "temperature": 1.0,
+        "repetition_penalty": 1.3,
+        "calibrated": true
+      },
+      "prosody_advice": "参考录音语气起伏较强，已自动采用更稳定的合成参数",
+      "warming": false,
+      "profile": {}
+    },
+    {
+      "id": "voice-211bac518fea",
+      "name": "知更鸟",
+      "style": "亲民",
+      "provider": "gpt-sovits",
+      "prompt_text": "黑天鹅小姐的谋略与手段，就如她的舞蹈一般周全曼妙。期待未来我们有共舞的那一刻。",
+      "prompt_lang": "zh",
+      "model_profile": "base",
+      "created_at": "2026-08-26T10:53:07.621917+08:00",
+      "cloned": 1,
+      "quality": {
+        "status": "ready",
+        "message": "标准 PCM WAV",
+        "duration": 7.1,
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 24000,
+        "active_ratio": 0.844,
+        "silence_ratio": 0.082,
+        "longest_silence": 0.26,
+        "clipped_ratio": 0.0,
+        "rms_db": -18.6,
+        "peak_db": -3.1
+      },
+      "reference_count": 2,
+      "uploaded_reference_count": 3,
+      "prompt_advice": {
+        "status": "ok",
+        "message": "参考文本长度与录音时长匹配",
+        "chars_per_second": 5.07
+      },
+      "warmed": true,
+      "calibrating": false,
+      "sampling_calibrated": true,
+      "sampling_profile": {
+        "top_p": 0.9,
+        "temperature": 0.75,
+        "repetition_penalty": 1.3,
+        "calibrated": true
+      },
+      "prosody_advice": "参考录音语气起伏较强，已自动采用更稳定的合成参数",
+      "warming": false,
+      "profile": {}
+    },
+    {
+      "id": "voice-929ae22d0023",
+      "name": "波提欧",
+      "style": "亲民",
+      "provider": "gpt-sovits",
+      "prompt_text": "我叫波提欧。听说过我的人都知道我是干什么的，没听说过我的人…为你的小命着想，最好永远也别听说。",
+      "prompt_lang": "zh",
+      "model_profile": "base",
+      "created_at": "2026-08-25T21:39:20.554849+08:00",
+      "cloned": 1,
+      "quality": {
+        "status": "ready",
+        "message": "标准 PCM WAV",
+        "duration": 7.52,
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 24000,
+        "active_ratio": 0.779,
+        "silence_ratio": 0.138,
+        "longest_silence": 0.32,
+        "clipped_ratio": 0.0,
+        "rms_db": -18.9,
+        "peak_db": -2.8
+      },
+      "reference_count": 3,
+      "uploaded_reference_count": 3,
+      "prompt_advice": {
+        "status": "ok",
+        "message": "参考文本长度与录音时长匹配",
+        "chars_per_second": 5.59
+      },
+      "warmed": true,
+      "calibrating": false,
+      "sampling_calibrated": true,
+      "sampling_profile": {
+        "top_p": 1.0,
+        "temperature": 1.0,
+        "repetition_penalty": 1.3,
+        "calibrated": true
+      },
+      "prosody_advice": "参考录音语气起伏较强，已自动采用更稳定的合成参数",
+      "warming": false,
+      "profile": {}
+    },
+    {
+      "id": "voice-f42877922900",
+      "name": "昔涟",
+      "style": "新版",
+      "provider": "gpt-sovits",
+      "prompt_text": "这是命运的邂逅吗？还是，久别重逢呢。",
+      "prompt_lang": "zh",
+      "model_profile": "xilian",
+      "created_at": "2026-08-20T22:49:36.703633+08:00",
+      "cloned": 1,
+      "quality": {
+        "status": "ready",
+        "message": "标准 PCM WAV",
+        "duration": 3.59,
+        "channels": 1,
+        "sample_width": 2,
+        "sample_rate": 24000,
+        "active_ratio": 0.729,
+        "silence_ratio": 0.178,
+        "longest_silence": 0.22,
+        "clipped_ratio": 0.0,
+        "rms_db": -27.1,
+        "peak_db": -11.0
+      },
+      "reference_count": 1,
+      "uploaded_reference_count": 1,
+      "prompt_advice": {
+        "status": "ok",
+        "message": "参考文本长度与录音时长匹配",
+        "chars_per_second": 4.18
+      },
+      "warmed": true,
+      "calibrating": false,
+      "sampling_calibrated": false,
+      "sampling_profile": {
+        "top_p": 0.9,
+        "temperature": 0.75,
+        "repetition_penalty": 1.3,
+        "calibrated": false
+      },
+      "prosody_advice": "正在分析音色与语气",
+      "warming": false,
+      "profile": {}
+    },
+    {
+      "id": "steady",
+      "name": "沉稳主播",
+      "style": "沉稳",
+      "provider": "browser",
+      "prompt_text": "",
+      "prompt_lang": "zh",
+      "model_profile": "base",
+      "created_at": "2026-08-20T11:34:48.317736+08:00",
+      "cloned": 0,
+      "quality": {
+        "status": "system",
+        "message": "系统音色"
+      },
+      "reference_count": 0,
+      "uploaded_reference_count": 0,
+      "prompt_advice": {
+        "status": "system",
+        "message": "系统音色"
+      },
+      "warmed": false,
+      "calibrating": false,
+      "sampling_calibrated": false,
+      "sampling_profile": {
+        "top_p": 0.9,
+        "temperature": 0.75,
+        "repetition_penalty": 1.3,
+        "calibrated": false
+      },
+      "prosody_advice": "正在分析音色与语气",
+      "warming": false,
+      "profile": {
+        "speed": 0.94,
+        "temperature": -0.1,
+        "repetition": 0.08
+      }
+    },
+    {
+      "id": "energetic",
+      "name": "活力主播",
+      "style": "活力",
+      "provider": "browser",
+      "prompt_text": "",
+      "prompt_lang": "zh",
+      "model_profile": "base",
+      "created_at": "2026-08-20T11:34:48.317736+08:00",
+      "cloned": 0,
+      "quality": {
+        "status": "system",
+        "message": "系统音色"
+      },
+      "reference_count": 0,
+      "uploaded_reference_count": 0,
+      "prompt_advice": {
+        "status": "system",
+        "message": "系统音色"
+      },
+      "warmed": false,
+      "calibrating": false,
+      "sampling_calibrated": false,
+      "sampling_profile": {
+        "top_p": 0.9,
+        "temperature": 0.75,
+        "repetition_penalty": 1.3,
+        "calibrated": false
+      },
+      "prosody_advice": "正在分析音色与语气",
+      "warming": false,
+      "profile": {
+        "speed": 1.05,
+        "temperature": 0.1,
+        "repetition": -0.05
+      }
+    },
+    {
+      "id": "friendly",
+      "name": "亲民主播",
+      "style": "亲民",
+      "provider": "browser",
+      "prompt_text": "",
+      "prompt_lang": "zh",
+      "model_profile": "base",
+      "created_at": "2026-08-20T11:34:48.317736+08:00",
+      "cloned": 0,
+      "quality": {
+        "status": "system",
+        "message": "系统音色"
+      },
+      "reference_count": 0,
+      "uploaded_reference_count": 0,
+      "prompt_advice": {
+        "status": "system",
+        "message": "系统音色"
+      },
+      "warmed": false,
+      "calibrating": false,
+      "sampling_calibrated": false,
+      "sampling_profile": {
+        "top_p": 0.9,
+        "temperature": 0.75,
+        "repetition_penalty": 1.3,
+        "calibrated": false
+      },
+      "prosody_advice": "正在分析音色与语气",
+      "warming": false,
+      "profile": {
+        "speed": 1.0,
+        "temperature": 0.0,
+        "repetition": 0.0
+      }
+    },
+    {
+      "id": "browser-default",
+      "name": "系统默认",
+      "style": "自然",
+      "provider": "browser",
+      "prompt_text": "",
+      "prompt_lang": "zh",
+      "model_profile": "base",
+      "created_at": "2026-08-20T11:34:48.317016+08:00",
+      "cloned": 0,
+      "quality": {
+        "status": "system",
+        "message": "系统音色"
+      },
+      "reference_count": 0,
+      "uploaded_reference_count": 0,
+      "prompt_advice": {
+        "status": "system",
+        "message": "系统音色"
+      },
+      "warmed": false,
+      "calibrating": false,
+      "sampling_calibrated": false,
+      "sampling_profile": {
+        "top_p": 0.9,
+        "temperature": 0.75,
+        "repetition_penalty": 1.3,
+        "calibrated": false
+      },
+      "prosody_advice": "正在分析音色与语气",
+      "warming": false,
+      "profile": {}
+    }
+  ],
+  "stream_samples": [
+    {
+      "text": "老板，今天为大家介绍欧拉5 EV 2026款580km激光雷达版。它的CLTC纯电续航为580公里，轴距2720毫米，最大功率150千瓦。",
+      "voice_id": "voice-f42877922900",
+      "first_audio_ms": 2323.1,
+      "bytes": 801324
+    },
+    {
+      "text": "老板，今天为大家介绍欧拉5 EV 2026款580km激光雷达版。它的CLTC纯电续航为580公里，轴距2720毫米，最大功率150千瓦。",
+      "voice_id": "voice-f42877922900",
+      "first_audio_ms": 2377.3,
+      "bytes": 801324
+    },
+    {
+      "text": "老板，今天为大家介绍欧拉5 EV 2026款580km激光雷达版。它的CLTC纯电续航为580公里，轴距2720毫米，最大功率150千瓦。",
+      "voice_id": "voice-f42877922900",
+      "first_audio_ms": 2298.3,
+      "bytes": 801324
+    }
+  ],
+  "batch_import": {
+    "count": 2,
+    "items": [
+      {
+        "name": "欧拉5投喂.txt",
+        "status": "ready"
+      },
+      {
+        "name": "欧拉5 EV 2026款参数.txt",
+        "status": "ready"
+      }
+    ],
+    "cleanup": true
+  },
+  "query": {
+    "answer": "根据当前车型资料：续航：580公里",
+    "confidence": "high",
+    "provider": "local-extractive",
+    "latency_ms": 5,
+    "sources": [
+      {
+        "document_id": 3,
+        "document_name": "欧拉5 EV 2026款 580km 激光雷达版参数.txt",
+        "content": "是：260\n驱动电机数是：单电机\n电机布局是：前置\n电池能量(kWh)是：58.3\n电动机总马力(Ps)是：204\n电池冷却方式是：液冷\n快充功能是：支持\n低速行车警告是：标配\n内置行车记录仪是：标配\n电池预加热是：标配\n对外放电是：标配\n辅助匝道自动驶出(入)是：标配\nCLTC纯电续航里程(km)是：580\n电能当量燃料消耗量(L/100km)是：1.",
+        "page": null,
+        "score": 1.5061,
+        "metadata": {
+          "brand": "欧拉",
+          "series": "欧拉5 EV",
+          "year": "2026"
+        }
+      },
+      {
+        "document_id": 3,
+        "document_name": "欧拉5 EV 2026款 580km 激光雷达版参数.txt",
+        "content": "TC纯电续航里程(km)是：580\n电能当量燃料消耗量(L/100km)是：1.35\n慢充接口位置是：车右前侧\n前电动机品牌是：蜂巢传动\n前电动机型号是：QT36TZ220001\n快充接口位置是：车右前侧\n对外交流放电功率(kW)是：6\n哨兵模式/千里眼是：标配\n热泵空调是：标配\n信号灯识别是：标配\n起步提醒是：标配\n车载KTV是：标配\n声纹识别是：标配\n辅助驾驶灯是：标配",
+        "page": null,
+        "score": 1.4752,
+        "metadata": {
+          "brand": "欧拉",
+          "series": "欧拉5 EV",
+          "year": "2026"
+        }
+      },
+      {
+        "document_id": 3,
+        "document_name": "欧拉5 EV 2026款 580km 激光雷达版参数.txt",
+        "content": "\n年款是：2026\n上市时间是：2025-12-16\n厂商指导价(元)是：13.38万\n级别是：紧凑型SUV\n能源类型是：纯电动\n最大功率(kW)是：150\n最大扭矩(N·m)是：260\n车身结构是：SUV\n长*宽*高(mm)是：4471*1844*1641\n官方0-100km/h加速(s)是：没有相关配置\n最高车速(km/h)是：170\n整备质量(kg)是：1655\n最大满载质量(kg)是：2055\n长度(mm)是：4471\n宽度(mm)是：1844\n高度(mm)是：1641\n轴距(mm)是：2720\n前轮距(mm)是：1583\n后轮距(mm)是：1577\n车门开启方式是：平开门\n后备厢容积(L)是：377\n风阻系数(Cd)是：没有相关配置\n简称是：电动车单速变速箱\n挡位个数是：1\n变速箱类型是：固定齿比变速箱\n车体结构是：承载式\n备胎规格是：没有相关配置\n主/副驾驶座安全气囊是：主标配/副标配\n前/后排侧气囊是：前标配/后-\n前/后排头部气囊(气帘)是：前标配/后标配\nABS防抱死是：标配\n制动力分配(EBD/CBC等)是：标配\n刹车辅助(EBA/BAS/BA等)是：标配\n牵引力控制(ASR/TCS/TRC等)是：标配\n车身稳定控制(ESC/ESP/DSC等)是：标配\nISOFIX儿童座椅接口是：标配\n车道偏离预警系统是：标配\n主动刹车/主动安全系统是：标配\n疲劳驾驶提示是：没有相关配置\n自动驻车是：标配\n上坡辅助是：标配\n陡坡缓降是：标配\n前/后驻车雷达是：前标配/后标配\n卫星导航系统是：标配\n导航路况信息显示是：标配\n并线辅助是：标配\n车道保持辅助系统是：标配\n辅助泊车入位是：标配\n电动后备厢是：标配\n电动后备厢位置记忆是：标配\n车顶行李架是：标配\n车内中控锁是：标配\n无钥匙启动系统是：标配\n主动闭合式进气格栅是：标配\nLED日间行车灯是：没有相关配置\n自适应远近光是：标配\n自动头灯是：标配\n车前雾灯是：没有相关配置\n大灯高度可调是：标配\n大灯延时关闭是：标配\n前/后电动车窗是：前标配/后标配\n车窗防夹手功能是：标配\n后雨刷是：标配\n蓝牙/车载电话是：标配\n车联网是：标配\nOTA升级是：标配\n多功能方向盘是：标配\n方向盘加热是：标配\n方向盘记忆是：没有相关配置\n全液晶仪表盘是：标配\n主/副驾驶座电动调节是：主标配/副标配\n副驾驶位后排可调节按钮是：没有相关配置\n第二排座椅调节是：没有相关配置\n前/后中央扶手是：前标配/后没有\n后排杯架是：没有相关配置\n扬声器品牌名称是：没有相关配置\n后排独立空调是：没有相关配置\n后座出风口是：标配\n温度分区控制是：没有相关配置\n车载空气净化器是：没有相关配置\n车内PM2.",
+        "page": null,
+        "score": 0.5576,
+        "metadata": {
+          "brand": "欧拉",
+          "series": "欧拉5 EV",
+          "year": "2026"
+        }
+      },
+      {
+        "document_id": 3,
+        "document_name": "欧拉5 EV 2026款 580km 激光雷达版参数.txt",
+        "content": "标配\n温度分区控制是：没有相关配置\n车载空气净化器是：没有相关配置\n车内PM2.5过滤装置是：标配\n接近角(°)是：17\n离去角(°)是：25\n前排中间气囊是：标配\nDOW开门预警是：标配\n前方碰撞预警是：标配\n后方碰撞预警是：标配\n透明底盘/540度影像是：标配\n倒车车侧预警系统是：标配\n车道居中保持是：标配\n道路交通标识识别是：标配\n遥控泊车是：标配\n循迹倒车是：标配\n辅助变道是：标配\n语音连续识别是：标配\n可见即可说是：标配\n应用商店是：标配\nETC装置是：标配\n能量回收系统是：标配\nWi-Fi热点是：标配\n电池快充时间(小时)是：0.",
+        "page": null,
+        "score": 0.1196,
+        "metadata": {
+          "brand": "欧拉",
+          "series": "欧拉5 EV",
+          "year": "2026"
+        }
+      },
+      {
+        "document_id": 3,
+        "document_name": "欧拉5 EV 2026款 580km 激光雷达版参数.txt",
+        "content": "标配\n能量回收系统是：标配\nWi-Fi热点是：标配\n电池快充时间(小时)是：0.33\n电池慢充时间(小时)是：10.5\n电池快充电量范围(%)是：30-80\n电动机(Ps)是：204\n电机类型是：永磁/同步\n电动机总功率(kW)是：150\n电动机总扭矩(N·m)是：260\n前电动机最大功率(kW)是：150\n前电动机最大扭矩(N·m)是：260\n驱动电机数是：单电机\n电机布局是：前置\n电池能量(kWh)是：58.",
+        "page": null,
+        "score": 0.0866,
+        "metadata": {
+          "brand": "欧拉",
+          "series": "欧拉5 EV",
+          "year": "2026"
+        }
+      }
+    ]
+  },
+  "dynamic_revision": {
+    "session_id": "92dcdcc4b6574604b704a74f353e8fe3",
+    "initial_version": 1,
+    "revised_version": 2,
+    "safe_sentence": 1,
+    "preserves_current_sentence": true
+  },
+  "materials": {
+    "document_version": "v1.2",
+    "docx_pages": [
+      3,
+      3,
+      2,
+      3,
+      3
+    ],
+    "pdf_render": "Word ExportAsFixedFormat + Poppler",
+    "ppt_slides": 11,
+    "ppt_overflow": "passed",
+    "sources": [
+      "GPT-SoVITS official Chinese README",
+      "2026 Chongqing AI competition brief"
+    ],
+    "style_reference": "2025-GM-A-485.pdf：采用黑色衬线字体、黑灰层级、白底水平线表格；不沿用其页面排版。"
+  }
+}

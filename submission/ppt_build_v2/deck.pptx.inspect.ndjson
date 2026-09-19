@@ -1,0 +1,256 @@
+{"kind":"deck","id":"pr/5qj609","name":"Deck"}
+{"kind":"layout","layoutId":"fe79da92-b675-4d1b-a08d-09176f6ba39c","name":"Master","type":"master"}
+{"kind":"layout","layoutId":"02da7fa2-145a-42af-be7b-689b00907a3d","name":"Title Slide","type":"title"}
+{"kind":"slide","id":"sl/2gl0nk","slide":1,"title":"重庆市 AI 大模型创新应用大赛","textShapes":11}
+{"kind":"textbox","id":"sh/itw3qtwv","slide":1,"text":"重庆市 AI 大模型创新应用大赛","textPreview":"重庆市 AI 大模型创新应用大赛","textChars":16,"textLines":1,"bbox":[72,58,500,24]}
+{"kind":"textbox","id":"sh/5g7mlovm","slide":1,"text":"汽车直播智能体","textPreview":"汽车直播智能体","textChars":7,"textLines":1,"bbox":[72,112,900,80]}
+{"kind":"textbox","id":"sh/4velsje1","slide":1,"text":"可溯源问答 · 流式播报 · 动态改稿 · 拟人化音色","textPreview":"可溯源问答 · 流式播报 · 动态改稿 · 拟人化音色","textChars":27,"textLines":1,"bbox":[78,213,1000,36]}
+{"kind":"shape","id":"sh/rip4nyds","slide":1,"bbox":[78,290,260,0]}
+{"kind":"textbox","id":"sh/6hg3utw7","slide":1,"text":"把汽车资料、直播脚本和语音输出放进同一条可验证链路","textPreview":"把汽车资料、直播脚本和语音输出放进同一条可验证链路","textChars":25,"textLines":1,"bbox":[78,320,800,32]}
+{"kind":"shape","id":"sh/tk7mp8vi","slide":1,"bbox":[850,112,300,320]}
+{"kind":"textbox","id":"sh/sjylw3ed","slide":1,"text":"题目验收","textPreview":"题目验收","textChars":4,"textLines":1,"bbox":[888,150,180,24]}
+{"kind":"textbox","id":"sh/fmp4rido","slide":1,"text":"40/40","textPreview":"40/40","textChars":5,"textLines":1,"bbox":[888,206,180,58]}
+{"kind":"textbox","id":"sh/elg3ydw3","slide":1,"text":"检索准确率","textPreview":"检索准确率","textChars":5,"textLines":1,"bbox":[888,270,180,24]}
+{"kind":"textbox","id":"sh/snuhcja5","slide":1,"text":"2323 ms","textPreview":"2323 ms","textChars":7,"textLines":1,"bbox":[888,334,180,42]}
+{"kind":"textbox","id":"sh/to3ilobq","slide":1,"text":"平均首音频","textPreview":"平均首音频","textChars":5,"textLines":1,"bbox":[888,382,180,24]}
+{"kind":"textbox","id":"sh/6lcza9sf","slide":1,"text":"汽车直播智能体  ·  2026 重庆 AI 大模型创新应用大赛","textPreview":"汽车直播智能体  ·  2026 重庆 AI 大模型创新应用大赛","textChars":32,"textLines":1,"bbox":[72,682,800,18]}
+{"kind":"textbox","id":"sh/rml0jet0","slide":1,"text":"1/11","textPreview":"1/11","textChars":4,"textLines":1,"bbox":[1160,682,48,18]}
+{"kind":"notes","id":"nt/2gl0nk","slide":1,"text":"[Sources]\n项目题目文件：C:/Users/seele/Desktop/6.（海云捷迅）2026年第二届重庆市AI大模型创新应用大赛企业出题.docx\nGPT-SoVITS 官方说明：https://github.com/RVC-Boss/GPT-SoVITS/blob/main/docs/cn/README.md\n[/Sources]"}
+{"kind":"slide","id":"sl/mu2c29","slide":2,"title":"01 / 场景","textShapes":12}
+{"kind":"textbox","id":"sh/qd47ihof","slide":2,"text":"01 / 场景","textPreview":"01 / 场景","textChars":7,"textLines":1,"bbox":[72,44,520,22]}
+{"kind":"textbox","id":"sh/dgv6twn6","slide":2,"text":"直播现场需要的是“可继续工作”的智能体","textPreview":"直播现场需要的是“可继续工作”的智能体","textChars":19,"textLines":1,"bbox":[72,78,1120,60]}
+{"kind":"textbox","id":"sh/sfmpkr6l","slide":2,"text":"答案要有出处，声音要不中断，稿子要能随时改。","textPreview":"答案要有出处，声音要不中断，稿子要能随时改。","textChars":22,"textLines":1,"bbox":[72,145,1060,32]}
+{"kind":"shape","id":"sh/3qton2p4","slide":2,"bbox":[72,196,1136,0]}
+{"kind":"textbox","id":"sh/ipk7exoj","slide":2,"text":"汽车直播智能体  ·  2026 重庆 AI 大模型创新应用大赛","textPreview":"汽车直播智能体  ·  2026 重庆 AI 大模型创新应用大赛","textChars":32,"textLines":1,"bbox":[72,682,800,18]}
+{"kind":"textbox","id":"sh/5cb6pcna","slide":2,"text":"2/11","textPreview":"2/11","textChars":4,"textLines":1,"bbox":[1160,682,48,18]}
+{"kind":"shape","id":"sh/4r2pg76p","slide":2,"bbox":[72,240,330,280]}
+{"kind":"textbox","id":"sh/vmtoj2ps","slide":2,"text":"资料散","textPreview":"资料散","textChars":3,"textLines":1,"bbox":[104,280,220,34]}
+{"kind":"textbox","id":"sh/ulk7axon","slide":2,"text":"PDF、Word、TXT 并存\n字段命名和版本不统一","textPreview":"PDF、Word、TXT 并存 | 字段命名和版本不统一","textChars":26,"textLines":2,"bbox":[104,335,250,80]}
+{"kind":"shape","id":"sh/wzydcnql","slide":2,"bbox":[475,240,330,280]}
+{"kind":"textbox","id":"sh/h07els76","slide":2,"text":"播报断","textPreview":"播报断","textChars":3,"textLines":1,"bbox":[507,280,220,34]}
+{"kind":"textbox","id":"sh/uxgvax8v","slide":2,"text":"传统整段生成\n首句等待，改稿要重来","textPreview":"传统整段生成 | 首句等待，改稿要重来","textChars":17,"textLines":2,"bbox":[507,335,250,80]}
+{"kind":"shape","id":"sh/vypwjip0","slide":2,"bbox":[878,240,330,280]}
+{"kind":"textbox","id":"sh/8byd8nqp","slide":2,"text":"证据弱","textPreview":"证据弱","textChars":3,"textLines":1,"bbox":[910,280,220,34]}
+{"kind":"textbox","id":"sh/9w7ehs7a","slide":2,"text":"只给答案不说来源\n主播无法快速核对","textPreview":"只给答案不说来源 | 主播无法快速核对","textChars":17,"textLines":2,"bbox":[910,335,250,80]}
+{"kind":"textbox","id":"sh/m9wvmd8j","slide":2,"text":"我们的切入点：把“证据、节奏、版本”设计成一等数据","textPreview":"我们的切入点：把“证据、节奏、版本”设计成一等数据","textChars":25,"textLines":1,"bbox":[72,570,1120,32]}
+{"kind":"notes","id":"nt/mu2c29","slide":2,"text":"[Sources]\n项目题目文件：C:/Users/seele/Desktop/6.（海云捷迅）2026年第二届重庆市AI大模型创新应用大赛企业出题.docx\nGPT-SoVITS 官方说明：https://github.com/RVC-Boss/GPT-SoVITS/blob/main/docs/cn/README.md\n[/Sources]"}
+{"kind":"slide","id":"sl/ksy2cm","slide":3,"title":"02 / 方案","textShapes":16}
+{"kind":"textbox","id":"sh/tc7id4jy","slide":3,"text":"02 / 方案","textPreview":"02 / 方案","textChars":7,"textLines":1,"bbox":[72,44,520,22]}
+{"kind":"textbox","id":"sh/69gzi9kn","slide":3,"text":"一条链路覆盖从资料到声音的五个动作","textPreview":"一条链路覆盖从资料到声音的五个动作","textChars":17,"textLines":1,"bbox":[72,78,1120,60]}
+{"kind":"textbox","id":"sh/7ap0be1s","slide":3,"text":"模块边界清晰，现场可以逐段演示，也可以替换单个服务。","textPreview":"模块边界清晰，现场可以逐段演示，也可以替换单个服务。","textChars":26,"textLines":1,"bbox":[72,145,1060,32]}
+{"kind":"shape","id":"sh/gfihoj2p","slide":3,"bbox":[72,196,1136,0]}
+{"kind":"textbox","id":"sh/hgrihoja","slide":3,"text":"汽车直播智能体  ·  2026 重庆 AI 大模型创新应用大赛","textPreview":"汽车直播智能体  ·  2026 重庆 AI 大模型创新应用大赛","textChars":32,"textLines":1,"bbox":[72,682,800,18]}
+{"kind":"textbox","id":"sh/ud0zm9kj","slide":3,"text":"3/11","textPreview":"3/11","textChars":4,"textLines":1,"bbox":[1160,682,48,18]}
+{"kind":"shape","id":"sh/fe90fe14","slide":3,"bbox":[80,290,180,110]}
+{"kind":"textbox","id":"sh/wjehcz25","slide":3,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[98,310,44,24]}
+{"kind":"textbox","id":"sh/xkni5kjq","slide":3,"text":"导入资料","textPreview":"导入资料","textChars":4,"textLines":1,"bbox":[98,350,145,30]}
+{"kind":"shape","id":"sh/14n210v6","slide":3,"bbox":[260,345,52,0]}
+{"kind":"shape","id":"sh/03elsvel","slide":3,"bbox":[312,290,180,110]}
+{"kind":"textbox","id":"sh/z25kzqd0","slide":3,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[330,310,44,24]}
+{"kind":"textbox","id":"sh/e1w3qlwv","slide":3,"text":"检索问答","textPreview":"检索问答","textChars":4,"textLines":1,"bbox":[330,350,145,30]}
+{"kind":"shape","id":"sh/9s7m5kvi","slide":3,"bbox":[492,345,52,0]}
+{"kind":"shape","id":"sh/orylwfex","slide":3,"bbox":[544,290,180,110]}
+{"kind":"textbox","id":"sh/nq5k3adc","slide":3,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[562,310,44,24]}
+{"kind":"textbox","id":"sh/mpw3u5wr","slide":3,"text":"生成脚本","textPreview":"生成脚本","textChars":4,"textLines":1,"bbox":[562,350,145,30]}
+{"kind":"shape","id":"sh/xw7m9kve","slide":3,"bbox":[724,345,52,0]}
+{"kind":"shape","id":"sh/wvyl0fet","slide":3,"bbox":[776,290,180,110]}
+{"kind":"textbox","id":"sh/gz65c325","slide":3,"text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[794,310,44,24]}
+{"kind":"textbox","id":"sh/h0f65o3q","slide":3,"text":"流式播报","textPreview":"流式播报","textChars":4,"textLines":1,"bbox":[794,350,145,30]}
+{"kind":"shape","id":"sh/uxonatkz","slide":3,"bbox":[956,345,52,0]}
+{"kind":"shape","id":"sh/vyxo3ylk","slide":3,"bbox":[1008,290,180,110]}
+{"kind":"textbox","id":"sh/43q5g321","slide":3,"text":"05","textPreview":"05","textChars":2,"textLines":1,"bbox":[1026,310,44,24]}
+{"kind":"textbox","id":"sh/54z6983m","slide":3,"text":"动态改稿","textPreview":"动态改稿","textChars":4,"textLines":1,"bbox":[1026,350,145,30]}
+{"kind":"textbox","id":"sh/i1onetkb","slide":3,"text":"每一步都有可观测状态：版本、来源、首包、队列和安全句","textPreview":"每一步都有可观测状态：版本、来源、首包、队列和安全句","textChars":26,"textLines":1,"bbox":[80,500,940,30]}
+{"kind":"notes","id":"nt/ksy2cm","slide":3,"text":"[Sources]\n项目题目文件：C:/Users/seele/Desktop/6.（海云捷迅）2026年第二届重庆市AI大模型创新应用大赛企业出题.docx\nGPT-SoVITS 官方说明：https://github.com/RVC-Boss/GPT-SoVITS/blob/main/docs/cn/README.md\n[/Sources]"}
+{"kind":"slide","id":"sl/tpp6ct","slide":4,"title":"03 / 架构","textShapes":13}
+{"kind":"textbox","id":"sh/xkfex8re","slide":4,"text":"03 / 架构","textPreview":"03 / 架构","textChars":7,"textLines":1,"bbox":[72,44,520,22]}
+{"kind":"textbox","id":"sh/ahov2d83","slide":4,"text":"本地优先，模型与业务通过接口解耦","textPreview":"本地优先，模型与业务通过接口解耦","textChars":16,"textLines":1,"bbox":[72,78,1120,60]}
+{"kind":"textbox","id":"sh/bixwvi98","slide":4,"text":"浏览器负责体验，FastAPI 负责编排，SQLite 负责追踪，GPT-SoVITS 负责声音。","textPreview":"浏览器负责体验，FastAPI 负责编排，SQLite 负责追踪，GPT-SoVITS 负责声音。","textChars":49,"textLines":1,"bbox":[72,145,1060,32]}
+{"kind":"shape","id":"sh/ovmd03qx","slide":4,"bbox":[72,196,1136,0]}
+{"kind":"textbox","id":"sh/pgfet8ri","slide":4,"text":"汽车直播智能体  ·  2026 重庆 AI 大模型创新应用大赛","textPreview":"汽车直播智能体  ·  2026 重庆 AI 大模型创新应用大赛","textChars":32,"textLines":1,"bbox":[72,682,800,18]}
+{"kind":"textbox","id":"sh/2t4vyt8r","slide":4,"text":"4/11","textPreview":"4/11","textChars":4,"textLines":1,"bbox":[1160,682,48,18]}
+{"kind":"shape","id":"sh/3udwry9c","slide":4,"bbox":[80,240,1120,72]}
+{"kind":"textbox","id":"sh/8rqxc7q1","slide":4,"text":"浏览器交互层   ·   直播台 / 知识库 / 验证页","textPreview":"浏览器交互层   ·   直播台 / 知识库 / 验证页","textChars":28,"textLines":1,"bbox":[110,262,1000,28]}
+{"kind":"shape","id":"sh/9cze5srm","slide":4,"bbox":[80,350,350,100]}
+{"kind":"textbox","id":"sh/90redk7q","slide":4,"text":"业务编排","textPreview":"业务编排","textChars":4,"textLines":1,"bbox":[108,374,270,26]}
+{"kind":"textbox","id":"sh/8zix4f65","slide":4,"text":"会话、问答、脚本、改稿","textPreview":"会话、问答、脚本、改稿","textChars":11,"textLines":1,"bbox":[108,409,270,22]}
+{"kind":"shape","id":"sh/nypwbap0","slide":4,"bbox":[465,350,350,100]}
+{"kind":"textbox","id":"sh/mxgf25of","slide":4,"text":"数据与溯源","textPreview":"数据与溯源","textChars":5,"textLines":1,"bbox":[493,374,270,26]}
+{"kind":"textbox","id":"sh/lw7e907u","slide":4,"text":"文档、片段、版本、音色","textPreview":"文档、片段、版本、音色","textChars":11,"textLines":1,"bbox":[493,409,270,22]}
+{"kind":"shape","id":"sh/0vyd0v69","slide":4,"bbox":[850,350,350,100]}
+{"kind":"textbox","id":"sh/zupw7qpo","slide":4,"text":"模型服务","textPreview":"模型服务","textChars":4,"textLines":1,"bbox":[878,374,270,26]}
+{"kind":"textbox","id":"sh/ytgvy5o3","slide":4,"text":"GPT-SoVITS v2ProPlus / PCM","textPreview":"GPT-SoVITS v2ProPlus / PCM","textChars":26,"textLines":1,"bbox":[878,409,270,22]}
+{"kind":"shape","id":"sh/5sbel47y","slide":4,"bbox":[255,312,0,0]}
+{"kind":"textbox","id":"sh/kr2xcz6d","slide":4,"text":"HTTP/JSON + 流式字节","textPreview":"HTTP/JSON + 流式字节","textChars":16,"textLines":1,"bbox":[450,500,390,25]}
+{"kind":"notes","id":"nt/tpp6ct","slide":4,"text":"[Sources]\n项目题目文件：C:/Users/seele/Desktop/6.（海云捷迅）2026年第二届重庆市AI大模型创新应用大赛企业出题.docx\nGPT-SoVITS 官方说明：https://github.com/RVC-Boss/GPT-SoVITS/blob/main/docs/cn/README.md\n[/Sources]"}
+{"kind":"slide","id":"sl/hi6i72","slide":5,"title":"04 / RAG","textShapes":17}
+{"kind":"textbox","id":"sh/v2d0fqtw","slide":5,"text":"04 / RAG","textPreview":"04 / RAG","textChars":8,"textLines":1,"bbox":[72,44,520,22]}
+{"kind":"textbox","id":"sh/w3mh8vuh","slide":5,"text":"答案来自证据单元，而不是来自猜测","textPreview":"答案来自证据单元，而不是来自猜测","textChars":16,"textLines":1,"bbox":[72,78,1120,60]}
+{"kind":"textbox","id":"sh/h4vih0b2","slide":5,"text":"清洗、切分、索引、版本和来源一起进入数据库。","textPreview":"清洗、切分、索引、版本和来源一起进入数据库。","textChars":22,"textLines":1,"bbox":[72,145,1060,32]}
+{"kind":"shape","id":"sh/i5oza5c7","slide":5,"bbox":[72,196,1136,0]}
+{"kind":"textbox","id":"sh/j6x0jats","slide":5,"text":"汽车直播智能体  ·  2026 重庆 AI 大模型创新应用大赛","textPreview":"汽车直播智能体  ·  2026 重庆 AI 大模型创新应用大赛","textChars":32,"textLines":1,"bbox":[72,682,800,18]}
+{"kind":"textbox","id":"sh/476hcfud","slide":5,"text":"5/11","textPreview":"5/11","textChars":4,"textLines":1,"bbox":[1160,682,48,18]}
+{"kind":"shape","id":"sh/58filkby","slide":5,"bbox":[88,255,250,62]}
+{"kind":"textbox","id":"sh/y9kzy1c3","slide":5,"text":"文件解析","textPreview":"文件解析","textChars":4,"textLines":1,"bbox":[112,273,190,24]}
+{"kind":"textbox","id":"sh/zatg76to","slide":5,"text":"PDF 页面 / DOCX 表格 / TXT 行序","textPreview":"PDF 页面 / DOCX 表格 / TXT 行序","textChars":25,"textLines":1,"bbox":[390,273,690,24]}
+{"kind":"shape","id":"sh/filonax0","slide":5,"bbox":[213,317,0,0]}
+{"kind":"shape","id":"sh/ehcne5wf","slide":5,"bbox":[88,345,250,62]}
+{"kind":"textbox","id":"sh/1k36pkf6","slide":5,"text":"清洗分段","textPreview":"清洗分段","textChars":4,"textLines":1,"bbox":[112,363,190,24]}
+{"kind":"textbox","id":"sh/gju5gfel","slide":5,"text":"标题、字段、标点和长度规则","textPreview":"标题、字段、标点和长度规则","textChars":13,"textLines":1,"bbox":[390,363,690,24]}
+{"kind":"shape","id":"sh/ru1ojax4","slide":5,"bbox":[213,407,0,0]}
+{"kind":"shape","id":"sh/6tsna5wj","slide":5,"bbox":[88,435,250,62]}
+{"kind":"textbox","id":"sh/twj6lkfu","slide":5,"text":"结构化入库","textPreview":"结构化入库","textChars":5,"textLines":1,"bbox":[112,453,190,24]}
+{"kind":"textbox","id":"sh/sva5cfep","slide":5,"text":"车型、年款、版本、页码、哈希向量","textPreview":"车型、年款、版本、页码、哈希向量","textChars":16,"textLines":1,"bbox":[390,453,690,24]}
+{"kind":"shape","id":"sh/jq14fqxs","slide":5,"bbox":[213,497,0,0]}
+{"kind":"shape","id":"sh/ipsn6lg7","slide":5,"bbox":[88,525,250,62]}
+{"kind":"textbox","id":"sh/ml87yl0f","slide":5,"text":"混合检索","textPreview":"混合检索","textChars":4,"textLines":1,"bbox":[112,543,190,24]}
+{"kind":"textbox","id":"sh/7mhorqhk","slide":5,"text":"词法命中 + 稳定向量 + 字段优先","textPreview":"词法命中 + 稳定向量 + 字段优先","textChars":18,"textLines":1,"bbox":[390,543,690,24]}
+{"kind":"shape","id":"sh/8nqp0vi5","slide":5,"bbox":[880,240,300,170]}
+{"kind":"textbox","id":"sh/9oz6t0zq","slide":5,"text":"输出","textPreview":"输出","textChars":2,"textLines":1,"bbox":[912,270,120,24]}
+{"kind":"textbox","id":"sh/up87250b","slide":5,"text":"答案\n置信度\n来源片段","textPreview":"答案 | 置信度 | 来源片段","textChars":11,"textLines":3,"bbox":[912,308,220,90]}
+{"kind":"textbox","id":"sh/vq1ovahw","slide":5,"text":"40/40 · 100%","textPreview":"40/40 · 100%","textChars":12,"textLines":1,"bbox":[88,620,260,32]}
+{"kind":"textbox","id":"sh/wrap4fih","slide":5,"text":"检索与最终问答均达标","textPreview":"检索与最终问答均达标","textChars":10,"textLines":1,"bbox":[360,624,400,24]}
+{"kind":"notes","id":"nt/hi6i72","slide":5,"text":"[Sources]\n项目题目文件：C:/Users/seele/Desktop/6.（海云捷迅）2026年第二届重庆市AI大模型创新应用大赛企业出题.docx\nGPT-SoVITS 官方说明：https://github.com/RVC-Boss/GPT-SoVITS/blob/main/docs/cn/README.md\n[/Sources]"}
+{"kind":"slide","id":"sl/4qxrih","slide":6,"title":"05 / 流式 TTS","textShapes":19}
+{"kind":"textbox","id":"sh/el0jytgz","slide":6,"text":"05 / 流式 TTS","textPreview":"05 / 流式 TTS","textChars":11,"textLines":1,"bbox":[72,44,520,22]}
+{"kind":"textbox","id":"sh/18r298fa","slide":6,"text":"先让第一句话响起来，再继续生成后面的声音","textPreview":"先让第一句话响起来，再继续生成后面的声音","textChars":20,"textLines":1,"bbox":[72,78,1120,60]}
+{"kind":"textbox","id":"sh/g7i103y5","slide":6,"text":"自然短语切分 + PCM 队列 + 句间淡入淡出，解决等待、断裂和嗒声。","textPreview":"自然短语切分 + PCM 队列 + 句间淡入淡出，解决等待、断裂和嗒声。","textChars":36,"textLines":1,"bbox":[72,145,1060,32]}
+{"kind":"shape","id":"sh/7ipk3ex8","slide":6,"bbox":[72,196,1136,0]}
+{"kind":"textbox","id":"sh/6hgjutgn","slide":6,"text":"汽车直播智能体  ·  2026 重庆 AI 大模型创新应用大赛","textPreview":"汽车直播智能体  ·  2026 重庆 AI 大模型创新应用大赛","textChars":32,"textLines":1,"bbox":[72,682,800,18]}
+{"kind":"textbox","id":"sh/tkr25ofe","slide":6,"text":"6/11","textPreview":"6/11","textChars":4,"textLines":1,"bbox":[1160,682,48,18]}
+{"kind":"shape","id":"sh/sjy1wjyt","slide":6,"bbox":[150,340,195,0]}
+{"kind":"shape","id":"sh/betkfixs","slide":6,"bbox":[100,305,110,70]}
+{"kind":"textbox","id":"sh/qdkj6dg7","slide":6,"text":"T0","textPreview":"T0","textChars":2,"textLines":1,"bbox":[120,319,70,22]}
+{"kind":"textbox","id":"sh/gbux0bqd","slide":6,"text":"提交脚本","textPreview":"提交脚本","textChars":4,"textLines":1,"bbox":[120,348,90,20]}
+{"kind":"shape","id":"sh/1c3y9g7y","slide":6,"bbox":[395,340,195,0]}
+{"kind":"shape","id":"sh/e9cfy18n","slide":6,"bbox":[345,305,110,70]}
+{"kind":"textbox","id":"sh/falg7698","slide":6,"text":"T1","textPreview":"T1","textChars":2,"textLines":1,"bbox":[365,319,70,22]}
+{"kind":"textbox","id":"sh/s7axwrqh","slide":6,"text":"切分短语","textPreview":"切分短语","textChars":4,"textLines":1,"bbox":[365,348,90,20]}
+{"kind":"shape","id":"sh/t83y5wr2","slide":6,"bbox":[640,340,195,0]}
+{"kind":"shape","id":"sh/6lsfu18b","slide":6,"bbox":[590,305,110,70]}
+{"kind":"textbox","id":"sh/rm1w369w","slide":6,"text":"T2","textPreview":"T2","textChars":2,"textLines":1,"bbox":[610,319,70,22]}
+{"kind":"textbox","id":"sh/4jaxsrql","slide":6,"text":"首个 PCM","textPreview":"首个 PCM","textChars":6,"textLines":1,"bbox":[610,348,90,20]}
+{"kind":"shape","id":"sh/5kje1wrq","slide":6,"bbox":[885,340,195,0]}
+{"kind":"shape","id":"sh/l0bu5sju","slide":6,"bbox":[835,305,110,70]}
+{"kind":"textbox","id":"sh/kf2dwni9","slide":6,"text":"T3","textPreview":"T3","textChars":2,"textLines":1,"bbox":[855,319,70,22]}
+{"kind":"textbox","id":"sh/jetc3i1o","slide":6,"text":"队列播放","textPreview":"队列播放","textChars":4,"textLines":1,"bbox":[855,348,90,20]}
+{"kind":"shape","id":"sh/ydkvud03","slide":6,"bbox":[1080,305,110,70]}
+{"kind":"textbox","id":"sh/xcbu18ji","slide":6,"text":"T4","textPreview":"T4","textChars":2,"textLines":1,"bbox":[1100,319,70,22]}
+{"kind":"textbox","id":"sh/cbids3ix","slide":6,"text":"继续生成","textPreview":"继续生成","textChars":4,"textLines":1,"bbox":[1100,348,90,20]}
+{"kind":"textbox","id":"sh/ba9czy1s","slide":6,"text":"mode 1 PCM 流","textPreview":"mode 1 PCM 流","textChars":12,"textLines":1,"bbox":[100,475,300,30]}
+{"kind":"textbox","id":"sh/a90vqt07","slide":6,"text":"24 kHz / 单声道 / 16-bit / 2 ms 边界淡入淡出","textPreview":"24 kHz / 单声道 / 16-bit / 2 ms 边界淡入淡出","textChars":35,"textLines":1,"bbox":[100,520,650,26]}
+{"kind":"shape","id":"sh/h8vedcj2","slide":6,"bbox":[870,450,290,112]}
+{"kind":"textbox","id":"sh/g7md47ih","slide":6,"text":"首音频平均","textPreview":"首音频平均","textChars":5,"textLines":1,"bbox":[900,475,190,22]}
+{"kind":"textbox","id":"sh/e1wji5cn","slide":6,"text":"2323 ms","textPreview":"2323 ms","textChars":7,"textLines":1,"bbox":[900,510,190,34]}
+{"kind":"notes","id":"nt/4qxrih","slide":6,"text":"[Sources]\n项目题目文件：C:/Users/seele/Desktop/6.（海云捷迅）2026年第二届重庆市AI大模型创新应用大赛企业出题.docx\nGPT-SoVITS 官方说明：https://github.com/RVC-Boss/GPT-SoVITS/blob/main/docs/cn/README.md\n[/Sources]"}
+{"kind":"slide","id":"sl/9l1icv","slide":7,"title":"06 / 动态改稿","textShapes":13}
+{"kind":"textbox","id":"sh/8fyxwnyx","slide":7,"text":"06 / 动态改稿","textPreview":"06 / 动态改稿","textChars":9,"textLines":1,"bbox":[72,44,520,22]}
+{"kind":"textbox","id":"sh/nupw3ixc","slide":7,"text":"改稿只刷新尚未播放的后续内容","textPreview":"改稿只刷新尚未播放的后续内容","textChars":14,"textLines":1,"bbox":[72,78,1120,60]}
+{"kind":"textbox","id":"sh/mtgfuxgr","slide":7,"text":"把播放中的短语设为不可变区，把待生成内容设为可变区。","textPreview":"把播放中的短语设为不可变区，把待生成内容设为可变区。","textChars":26,"textLines":1,"bbox":[72,145,1060,32]}
+{"kind":"shape","id":"sh/xkre9cfe","slide":7,"bbox":[72,196,1136,0]}
+{"kind":"textbox","id":"sh/wjix07yt","slide":7,"text":"汽车直播智能体  ·  2026 重庆 AI 大模型创新应用大赛","textPreview":"汽车直播智能体  ·  2026 重庆 AI 大模型创新应用大赛","textChars":32,"textLines":1,"bbox":[72,682,800,18]}
+{"kind":"textbox","id":"sh/vi9w72xo","slide":7,"text":"7/11","textPreview":"7/11","textChars":4,"textLines":1,"bbox":[1160,682,48,18]}
+{"kind":"shape","id":"sh/ahgfyxg3","slide":7,"bbox":[84,270,440,210]}
+{"kind":"textbox","id":"sh/donex8fa","slide":7,"text":"不可变区","textPreview":"不可变区","textChars":4,"textLines":1,"bbox":[118,302,180,26]}
+{"kind":"textbox","id":"sh/cnedo3yp","slide":7,"text":"当前正在播放的短语","textPreview":"当前正在播放的短语","textChars":9,"textLines":1,"bbox":[118,350,300,34]}
+{"kind":"textbox","id":"sh/utsvexon","slide":7,"text":"完整结束，不截断、不重复","textPreview":"完整结束，不截断、不重复","textChars":12,"textLines":1,"bbox":[118,408,300,24]}
+{"kind":"shape","id":"sh/vu1cni58","slide":7,"bbox":[580,270,560,210]}
+{"kind":"textbox","id":"sh/gvadgn6t","slide":7,"text":"可变区","textPreview":"可变区","textChars":3,"textLines":1,"bbox":[614,302,180,26]}
+{"kind":"textbox","id":"sh/hw3upsny","slide":7,"text":"尚未开始播放的后续片段","textPreview":"尚未开始播放的后续片段","textChars":11,"textLines":1,"bbox":[614,350,420,34]}
+{"kind":"textbox","id":"sh/ixcvixoj","slide":7,"text":"取消旧请求，按新版本重新生成","textPreview":"取消旧请求，按新版本重新生成","textChars":14,"textLines":1,"bbox":[614,408,420,24]}
+{"kind":"shape","id":"sh/3ylcr254","slide":7,"bbox":[524,375,56,0]}
+{"kind":"textbox","id":"sh/4zudk76p","slide":7,"text":"revision 1  →  revision 2","textPreview":"revision 1  →  revision 2","textChars":25,"textLines":1,"bbox":[84,570,450,30]}
+{"kind":"textbox","id":"sh/503utcna","slide":7,"text":"safe_sentence = 1","textPreview":"safe_sentence = 1","textChars":17,"textLines":1,"bbox":[610,570,350,30]}
+{"kind":"notes","id":"nt/9l1icv","slide":7,"text":"[Sources]\n项目题目文件：C:/Users/seele/Desktop/6.（海云捷迅）2026年第二届重庆市AI大模型创新应用大赛企业出题.docx\nGPT-SoVITS 官方说明：https://github.com/RVC-Boss/GPT-SoVITS/blob/main/docs/cn/README.md\n[/Sources]"}
+{"kind":"slide","id":"sl/rfdt5v","slide":8,"title":"07 / 音色","textShapes":20}
+{"kind":"textbox","id":"sh/ju5cz25w","slide":8,"text":"07 / 音色","textPreview":"07 / 音色","textChars":7,"textLines":1,"bbox":[72,44,520,22]}
+{"kind":"textbox","id":"sh/4vets761","slide":8,"text":"音色质量从参考音频门禁开始","textPreview":"音色质量从参考音频门禁开始","textChars":13,"textLines":1,"bbox":[72,78,1120,60]}
+{"kind":"textbox","id":"sh/5wnu1cnm","slide":8,"text":"不把随机性当作补救；先保证样本、文本、profile 和预热状态一致。","textPreview":"不把随机性当作补救；先保证样本、文本、profile 和预热状态一致。","textChars":35,"textLines":1,"bbox":[72,145,1060,32]}
+{"kind":"shape","id":"sh/upcbmdoz","slide":8,"bbox":[72,196,1136,0]}
+{"kind":"textbox","id":"sh/vqlcvi5k","slide":8,"text":"汽车直播智能体  ·  2026 重庆 AI 大模型创新应用大赛","textPreview":"汽车直播智能体  ·  2026 重庆 AI 大模型创新应用大赛","textChars":32,"textLines":1,"bbox":[72,682,800,18]}
+{"kind":"textbox","id":"sh/wreton65","slide":8,"text":"8/11","textPreview":"8/11","textChars":4,"textLines":1,"bbox":[1160,682,48,18]}
+{"kind":"shape","id":"sh/hsnuxsnq","slide":8,"bbox":[80,278,230,145]}
+{"kind":"textbox","id":"sh/elgbyhoj","slide":8,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[100,300,40,20]}
+{"kind":"textbox","id":"sh/fmpc7m5o","slide":8,"text":"样本","textPreview":"样本","textChars":2,"textLines":1,"bbox":[100,337,180,28]}
+{"kind":"textbox","id":"sh/z6h0zm1o","slide":8,"text":"3-10 秒 / 单人 / 无配乐","textPreview":"3-10 秒 / 单人 / 无配乐","textChars":17,"textLines":1,"bbox":[100,382,190,38]}
+{"kind":"shape","id":"sh/y58j6h03","slide":8,"bbox":[360,278,230,145]}
+{"kind":"textbox","id":"sh/l8ji1cje","slide":8,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[380,300,40,20]}
+{"kind":"textbox","id":"sh/07q187it","slide":8,"text":"文本","textPreview":"文本","textChars":2,"textLines":1,"bbox":[380,337,180,28]}
+{"kind":"textbox","id":"sh/na103m1k","slide":8,"text":"逐字一致 / 时长密度","textPreview":"逐字一致 / 时长密度","textChars":11,"textLines":1,"bbox":[380,382,190,38]}
+{"kind":"shape","id":"sh/m9sjah0z","slide":8,"bbox":[640,278,230,145]}
+{"kind":"textbox","id":"sh/9wj25wjq","slide":8,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[660,300,40,20]}
+{"kind":"textbox","id":"sh/8ba1cri5","slide":8,"text":"profile","textPreview":"profile","textChars":7,"textLines":1,"bbox":[660,337,180,28]}
+{"kind":"textbox","id":"sh/vy1k761w","slide":8,"text":"v2ProPlus / voice_id","textPreview":"v2ProPlus / voice_id","textChars":20,"textLines":1,"bbox":[660,382,190,38]}
+{"kind":"shape","id":"sh/axsje10b","slide":8,"bbox":[920,278,230,145]}
+{"kind":"textbox","id":"sh/65gvmpof","slide":8,"text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[940,300,40,20]}
+{"kind":"textbox","id":"sh/r6pcvup0","slide":8,"text":"预热","textPreview":"预热","textChars":2,"textLines":1,"bbox":[940,337,180,28]}
+{"kind":"textbox","id":"sh/s7ydoz6l","slide":8,"text":"切换前先跑短句","textPreview":"切换前先跑短句","textChars":7,"textLines":1,"bbox":[940,382,190,38]}
+{"kind":"textbox","id":"sh/t87ux476","slide":8,"text":"质量指标","textPreview":"质量指标","textChars":4,"textLines":1,"bbox":[80,495,150,24]}
+{"kind":"textbox","id":"sh/i1wvipoj","slide":8,"text":"active_ratio  ·  silence_ratio  ·  clipped_ratio  ·  chars_per_second","textPreview":"active_ratio  ·  silence_ratio  ·  clipped_ratio  ·  chars_per_second","textChars":69,"textLines":1,"bbox":[250,495,800,24]}
+{"kind":"textbox","id":"sh/j25crup4","slide":8,"text":"6 套克隆音色已登记并可切换","textPreview":"6 套克隆音色已登记并可切换","textChars":14,"textLines":1,"bbox":[80,580,560,28]}
+{"kind":"notes","id":"nt/rfdt5v","slide":8,"text":"[Sources]\n项目题目文件：C:/Users/seele/Desktop/6.（海云捷迅）2026年第二届重庆市AI大模型创新应用大赛企业出题.docx\nGPT-SoVITS 官方说明：https://github.com/RVC-Boss/GPT-SoVITS/blob/main/docs/cn/README.md\n[/Sources]"}
+{"kind":"slide","id":"sl/huohke","slide":9,"title":"08 / 现场演示","textShapes":14}
+{"kind":"textbox","id":"sh/qt4bu5ob","slide":9,"text":"08 / 现场演示","textPreview":"08 / 现场演示","textChars":9,"textLines":1,"bbox":[72,44,520,22]}
+{"kind":"textbox","id":"sh/dwvupknm","slide":9,"text":"三分钟把验收要求讲清楚","textPreview":"三分钟把验收要求讲清楚","textChars":11,"textLines":1,"bbox":[72,78,1120,60]}
+{"kind":"textbox","id":"sh/svmtwf6h","slide":9,"text":"演示顺序按评委的判断路径组织：有资料、有证据、有声音、有修改。","textPreview":"演示顺序按评委的判断路径组织：有资料、有证据、有声音、有修改。","textChars":31,"textLines":1,"bbox":[72,145,1060,32]}
+{"kind":"shape","id":"sh/3qtcjq5k","slide":9,"bbox":[72,196,1136,0]}
+{"kind":"textbox","id":"sh/ipkbq5oz","slide":9,"text":"汽车直播智能体  ·  2026 重庆 AI 大模型创新应用大赛","textPreview":"汽车直播智能体  ·  2026 重庆 AI 大模型创新应用大赛","textChars":32,"textLines":1,"bbox":[72,682,800,18]}
+{"kind":"textbox","id":"sh/5svul0nq","slide":9,"text":"9/11","textPreview":"9/11","textChars":4,"textLines":1,"bbox":[1160,682,48,18]}
+{"kind":"shape","id":"sh/4r2tsv65","slide":9,"bbox":[90,280,220,170]}
+{"kind":"textbox","id":"sh/nmxcvu54","slide":9,"text":"01","textPreview":"01","textChars":2,"textLines":1,"bbox":[108,302,40,20]}
+{"kind":"textbox","id":"sh/2lobmpoj","slide":9,"text":"导入资料\n展示版本与片段","textPreview":"导入资料 | 展示版本与片段","textChars":12,"textLines":2,"bbox":[108,340,185,62]}
+{"kind":"shape","id":"sh/kvqd8729","slide":9,"bbox":[368,280,220,170]}
+{"kind":"textbox","id":"sh/lwze1cju","slide":9,"text":"02","textPreview":"02","textChars":2,"textLines":1,"bbox":[386,302,40,20]}
+{"kind":"textbox","id":"sh/yt8v6hkj","slide":9,"text":"提问续航\n展示来源与置信度","textPreview":"提问续航 | 展示来源与置信度","textChars":13,"textLines":2,"bbox":[386,340,185,62]}
+{"kind":"shape","id":"sh/juhwz21o","slide":9,"bbox":[646,280,220,170]}
+{"kind":"textbox","id":"sh/wr6d472d","slide":9,"text":"03","textPreview":"03","textChars":2,"textLines":1,"bbox":[664,302,40,20]}
+{"kind":"textbox","id":"sh/xsfexcjy","slide":9,"text":"播放脚本\n首包立即排程","textPreview":"播放脚本 | 首包立即排程","textChars":11,"textLines":2,"bbox":[664,340,185,62]}
+{"kind":"shape","id":"sh/a5ov2xk7","slide":9,"bbox":[924,280,220,170]}
+{"kind":"textbox","id":"sh/b6xcv21s","slide":9,"text":"04","textPreview":"04","textChars":2,"textLines":1,"bbox":[942,302,40,20]}
+{"kind":"textbox","id":"sh/o36d0n21","slide":9,"text":"改写后半句\n观察安全切换","textPreview":"改写后半句 | 观察安全切换","textChars":12,"textLines":2,"bbox":[942,340,185,62]}
+{"kind":"textbox","id":"sh/94futsjm","slide":9,"text":"最后打开验证页，现场展示 100% 检索/问答准确率和 2323 ms 首音频平均","textPreview":"最后打开验证页，现场展示 100% 检索/问答准确率和 2323 ms 首音频平均","textChars":41,"textLines":1,"bbox":[90,545,1010,30]}
+{"kind":"notes","id":"nt/huohke","slide":9,"text":"[Sources]\n项目题目文件：C:/Users/seele/Desktop/6.（海云捷迅）2026年第二届重庆市AI大模型创新应用大赛企业出题.docx\nGPT-SoVITS 官方说明：https://github.com/RVC-Boss/GPT-SoVITS/blob/main/docs/cn/README.md\n[/Sources]"}
+{"kind":"slide","id":"sl/ccn8vr","slide":10,"title":"09 / 指标","textShapes":18}
+{"kind":"textbox","id":"sh/2dgzmpwj","slide":10,"text":"09 / 指标","textPreview":"09 / 指标","textChars":7,"textLines":1,"bbox":[72,44,520,22]}
+{"kind":"textbox","id":"sh/pgrix4va","slide":10,"text":"每个硬指标都对应一份可复现证据","textPreview":"每个硬指标都对应一份可复现证据","textChars":15,"textLines":1,"bbox":[72,78,1120,60]}
+{"kind":"textbox","id":"sh/ofyhozep","slide":10,"text":"不只报结果，也说明样本、目标和验证入口。","textPreview":"不只报结果，也说明样本、目标和验证入口。","textChars":20,"textLines":1,"bbox":[72,145,1060,32]}
+{"kind":"shape","id":"sh/bi90zudg","slide":10,"bbox":[72,196,1136,0]}
+{"kind":"textbox","id":"sh/qh0zqpwv","slide":10,"text":"汽车直播智能体  ·  2026 重庆 AI 大模型创新应用大赛","textPreview":"汽车直播智能体  ·  2026 重庆 AI 大模型创新应用大赛","textChars":32,"textLines":1,"bbox":[72,682,800,18]}
+{"kind":"textbox","id":"sh/dkri14v6","slide":10,"text":"10/11","textPreview":"10/11","textChars":5,"textLines":1,"bbox":[1160,682,48,18]}
+{"kind":"shape","id":"sh/cjihszel","slide":10,"bbox":[90,250,1100,54]}
+{"kind":"textbox","id":"sh/zm903edc","slide":10,"text":"检索准确率","textPreview":"检索准确率","textChars":5,"textLines":1,"bbox":[120,265,280,24]}
+{"kind":"textbox","id":"sh/yl0zu9wr","slide":10,"text":"40/40 · 100%","textPreview":"40/40 · 100%","textChars":12,"textLines":1,"bbox":[520,265,300,24]}
+{"kind":"textbox","id":"sh/k7ahozi9","slide":10,"text":"目标 >=85%","textPreview":"目标 >=85%","textChars":8,"textLines":1,"bbox":[900,265,220,24]}
+{"kind":"shape","id":"sh/5sjih4zu","slide":10,"bbox":[90,322,1100,54]}
+{"kind":"textbox","id":"sh/y5szmp03","slide":10,"text":"问答准确率","textPreview":"问答准确率","textChars":5,"textLines":1,"bbox":[120,337,280,24]}
+{"kind":"textbox","id":"sh/j610fuho","slide":10,"text":"40/40 · 100%","textPreview":"40/40 · 100%","textChars":12,"textLines":1,"bbox":[520,337,300,24]}
+{"kind":"textbox","id":"sh/svahszil","slide":10,"text":"目标 >=85%","textPreview":"目标 >=85%","textChars":8,"textLines":1,"bbox":[900,337,220,24]}
+{"kind":"shape","id":"sh/tw3il4zq","slide":10,"bbox":[90,394,1100,54]}
+{"kind":"textbox","id":"sh/6tszqp0f","slide":10,"text":"TTS 首音频","textPreview":"TTS 首音频","textChars":7,"textLines":1,"bbox":[120,409,280,24]}
+{"kind":"textbox","id":"sh/7u10juh0","slide":10,"text":"平均 2323 ms","textPreview":"平均 2323 ms","textChars":10,"textLines":1,"bbox":[520,409,300,24]}
+{"kind":"textbox","id":"sh/gzuhwjih","slide":10,"text":"目标 <=3000 ms","textPreview":"目标 <=3000 ms","textChars":12,"textLines":1,"bbox":[900,409,220,24]}
+{"kind":"shape","id":"sh/h03ipoz2","slide":10,"bbox":[90,466,1100,54]}
+{"kind":"textbox","id":"sh/p4fqtknu","slide":10,"text":"单元测试","textPreview":"单元测试","textChars":4,"textLines":1,"bbox":[120,481,280,24]}
+{"kind":"textbox","id":"sh/4369kf69","slide":10,"text":"35/35 passed","textPreview":"35/35 passed","textChars":12,"textLines":1,"bbox":[520,481,300,24]}
+{"kind":"textbox","id":"sh/32x8ra54","slide":10,"text":"无失败","textPreview":"无失败","textChars":3,"textLines":1,"bbox":[900,481,220,24]}
+{"kind":"textbox","id":"sh/21o7i5oj","slide":10,"text":"证据文件：evidence/verification.json  ·  复现命令：verify.ps1","textPreview":"证据文件：evidence/verification.json  ·  复现命令：verify.ps1","textChars":51,"textLines":1,"bbox":[90,590,900,24]}
+{"kind":"notes","id":"nt/ccn8vr","slide":10,"text":"[Sources]\n项目题目文件：C:/Users/seele/Desktop/6.（海云捷迅）2026年第二届重庆市AI大模型创新应用大赛企业出题.docx\nGPT-SoVITS 官方说明：https://github.com/RVC-Boss/GPT-SoVITS/blob/main/docs/cn/README.md\n[/Sources]"}
+{"kind":"slide","id":"sl/iw8o4u","slide":11,"title":"10 / 落地","textShapes":13}
+{"kind":"textbox","id":"sh/o7uxgret","slide":11,"text":"10 / 落地","textPreview":"10 / 落地","textChars":7,"textLines":1,"bbox":[72,44,520,22]}
+{"kind":"textbox","id":"sh/n6lg76x8","slide":11,"text":"从比赛原型走向可复用的直播工作台","textPreview":"从比赛原型走向可复用的直播工作台","textChars":16,"textLines":1,"bbox":[72,78,1120,60]}
+{"kind":"textbox","id":"sh/m5cfe1wn","slide":11,"text":"本地优先降低数据外发风险，模块化接口保留后续扩展空间。","textPreview":"本地优先降低数据外发风险，模块化接口保留后续扩展空间。","textChars":27,"textLines":1,"bbox":[72,145,1060,32]}
+{"kind":"shape","id":"sh/xwnydgfa","slide":11,"bbox":[72,196,1136,0]}
+{"kind":"textbox","id":"sh/wvexkbe5","slide":11,"text":"汽车直播智能体  ·  2026 重庆 AI 大模型创新应用大赛","textPreview":"汽车直播智能体  ·  2026 重庆 AI 大模型创新应用大赛","textChars":32,"textLines":1,"bbox":[72,682,800,18]}
+{"kind":"textbox","id":"sh/bulgb6xk","slide":11,"text":"11/11","textPreview":"11/11","textChars":5,"textLines":1,"bbox":[1160,682,48,18]}
+{"kind":"shape","id":"sh/atcfi1wz","slide":11,"bbox":[100,270,300,180]}
+{"kind":"textbox","id":"sh/l0nyhgfm","slide":11,"text":"可复制","textPreview":"可复制","textChars":3,"textLines":1,"bbox":[128,312,240,32]}
+{"kind":"textbox","id":"sh/kzehove1","slide":11,"text":"车型资料和音色 profile\n按项目隔离","textPreview":"车型资料和音色 profile | 按项目隔离","textChars":21,"textLines":2,"bbox":[128,370,230,58]}
+{"kind":"shape","id":"sh/e9wnypof","slide":11,"bbox":[470,270,300,180]}
+{"kind":"textbox","id":"sh/zaporu5k","slide":11,"text":"可维护","textPreview":"可维护","textChars":3,"textLines":1,"bbox":[498,312,240,32]}
+{"kind":"textbox","id":"sh/0by50z65","slide":11,"text":"版本、指标和日志\n支持现场复盘","textPreview":"版本、指标和日志 | 支持现场复盘","textChars":15,"textLines":2,"bbox":[498,370,230,58]}
+{"kind":"shape","id":"sh/1c76tknq","slide":11,"bbox":[840,270,300,180]}
+{"kind":"textbox","id":"sh/mdgn2pob","slide":11,"text":"可扩展","textPreview":"可扩展","textChars":3,"textLines":1,"bbox":[868,312,240,32]}
+{"kind":"textbox","id":"sh/nepovu5w","slide":11,"text":"可接入更多模型\n不改变前端流程","textPreview":"可接入更多模型 | 不改变前端流程","textChars":15,"textLines":2,"bbox":[868,370,230,58]}
+{"kind":"textbox","id":"sh/ofy54z6h","slide":11,"text":"下一步","textPreview":"下一步","textChars":3,"textLines":1,"bbox":[100,528,140,24]}
+{"kind":"textbox","id":"sh/9g76x4n2","slide":11,"text":"补齐听测者评分，固定现场机器环境，按提交清单完成归档。","textPreview":"补齐听测者评分，固定现场机器环境，按提交清单完成归档。","textChars":27,"textLines":1,"bbox":[250,528,780,28]}
+{"kind":"notes","id":"nt/iw8o4u","slide":11,"text":"[Sources]\n项目题目文件：C:/Users/seele/Desktop/6.（海云捷迅）2026年第二届重庆市AI大模型创新应用大赛企业出题.docx\nGPT-SoVITS 官方说明：https://github.com/RVC-Boss/GPT-SoVITS/blob/main/docs/cn/README.md\n[/Sources]"}

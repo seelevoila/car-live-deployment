@@ -25,7 +25,14 @@
     ).join('')}</div></section>`;
   }
 
-  const api = {unavailable, preferred, options, cards};
+  function missingCoverage(script, prompt, normalize = text => text) {
+    const tokens = String(script || '').match(/\d+(?:\.\d+)?\s*(?:km\/h|kWh|kW|km|毫米|公里|千瓦|牛米|升|秒|年|款)?|[A-Za-z]{2,}|千瓦时|公里每小时|毫米|公里|千瓦|牛米/gi) || [];
+    const reference = normalize(String(prompt || '')).replace(/\s+/g, '').toUpperCase();
+    return [...new Set(tokens.map(token => token.replace(/\s+/g, '')))]
+      .filter(token => !reference.includes(normalize(token).replace(/\s+/g, '').toUpperCase()));
+  }
+
+  const api = {unavailable, preferred, options, cards, missingCoverage};
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.VoiceLibrary = api;
 })(typeof window !== 'undefined' ? window : globalThis);

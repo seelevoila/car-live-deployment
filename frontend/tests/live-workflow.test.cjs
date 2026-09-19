@@ -17,11 +17,11 @@ function harness() {
   const nodes = {};
   const node = (value = '') => ({
     value, textContent: '', innerHTML: '', isConnected: true, disabled: false,
-    dataset: {}, options: [], selectedOptions: [{dataset: {}, value: 'browser-default'}],
+    dataset: {}, style:{}, options: [], selectedOptions: [{dataset: {}, value: 'browser-default'}],
     setAttribute() {}, addEventListener() {}, classList: {toggle() {}}, querySelector: () => null,
   });
   for (const id of ['app', 'script', 'question', 'vehicle', 'voice', 'speed', 'volume', 'pitch',
-    'play', 'pause', 'stop', 'revise', 'playstate', 'playunit', 'version', 'ask', 'answer', 'speakAnswer', 'status']) {
+    'play', 'pause', 'stop', 'revise', 'playstate', 'playunit', 'version', 'ask', 'answer', 'speakAnswer', 'status','ttsLatency']) {
     nodes['#' + id] = node();
   }
   nodes['#script'].value = 'Hello. New sentence.';
@@ -35,7 +35,7 @@ function harness() {
   let fetchHandler = async () => response({});
   const context = vm.createContext({
     document: {querySelector: selector => nodes[selector] || null, querySelectorAll: () => []},
-    console: {log() {}, warn() {}, error() {}}, performance, AbortController, DOMException,
+    console: {log() {}, info() {}, warn() {}, error() {}}, performance, AbortController, DOMException,
     setTimeout: () => 1, clearTimeout() {}, setInterval: () => 2, clearInterval() {},
     addEventListener() {},
     sessionStorage: {getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value)},
@@ -219,4 +219,142 @@ test('a stream chunk that arrives after stop cannot schedule audio', async () =>
   chunk.resolve({done: false, value: new Uint8Array([1, 2])});
   await streaming;
   assert.equal(h.context.scheduled.length, 0);
+});
+
+test('the first GPT stream request contains only the first phrase', async () => {
+  const h = harness();
+  h.fetch(async () => ({ok: true, body: {getReader: () => ({
+    read: async () => ({done: true}), cancel: async () => {},
+  })}}));
+  h.run("liveRun = createLiveRun('gpt-sovits', ['第一句。', '第二句。', '第三句。']);");
+  await h.run('streamGptUnit(liveRun)');
+  assert.equal(h.requests.length, 1);
+  const body = JSON.parse(h.requests[0].options.body);
+  assert.equal(body.text, '第一句。');
+  assert.equal(body.stream_batch, true);
+});
+
+test('script and answer timers stop on failures, stop and navigation', async () => {
+  const h=harness();
+  h.run('startLatencyTimer()');
+  assert.match(h.nodes['#ttsLatency'].textContent,/0.0s/);
+  h.run('stopCurrentView()');
+  assert.equal(h.run('ttsLatencyTimer'),null);
+  assert.equal(h.nodes['#ttsLatency'].textContent,'');
+  h.run("selectedVoiceWantsGpt=()=>true;ensureAudio=async()=>{};waitForGptReady=async()=>false;");
+  await h.run("speakText('回答内容。')");
+  assert.equal(h.run('ttsLatencyTimer'),null);
+  assert.equal(h.nodes['#ttsLatency'].textContent,'');
+  h.run('startLatencyTimer();stopLatencyTimer(1234)');
+  assert.equal(h.nodes['#ttsLatency'].textContent,'✓ 首音频 1.23s');
+  h.run('stop()');
+  assert.equal(h.nodes['#ttsLatency'].textContent,'');
+});
+
+test('ready answer starts its timer at the click and retains that timestamp',async()=>{
+  const h=harness(),waiting=deferred();
+  h.context.readiness=waiting.promise;
+  h.run('selectedVoiceWantsGpt=()=>true;ttsStatus={provider:"gpt-sovits",ready:true,live_path_warmed:true};ensureAudio=async()=>{};waitForGptReady=()=>readiness;');
+  const task=h.run("speakText('回答内容。')");
+  const clicked=h.run('audioRequestedAt');
+  assert.match(h.nodes['#ttsLatency'].textContent,/0.0s/);
+  h.run('startGptRun=async()=>{liveRun=createLiveRun("gpt-sovits",["回答内容。"]);liveRun.requestedAt=audioRequestedAt;};');
+  waiting.resolve(true);await task;
+  assert.equal(h.run('liveRun.requestedAt'),clicked);
+  h.run('stop()');
+});
+
+test('playback is disabled until live readiness, and direct calls cannot start a waiting timer', async()=>{
+  const h=harness();
+  h.run('selectedVoiceWantsGpt=()=>true;currentAnswer="已生成回答";ttsStatus={provider:"gpt-sovits",ready:true,live_path_warmed:false};updatePlaybackControls();');
+  assert.equal(h.nodes['#play'].disabled,true);
+  assert.equal(h.nodes['#speakAnswer'].disabled,true);
+  await h.run('play()');
+  await h.run('speakText("测试");');
+  assert.equal(h.run('ttsLatencyTimer'),null);
+  assert.equal(h.requests.length,0);
+  h.run('ttsStatus.live_path_warmed=true;updatePlaybackControls();');
+  assert.equal(h.nodes['#play'].disabled,false);
+  assert.equal(h.nodes['#speakAnswer'].disabled,false);
+  h.run('voicePrimeInFlight=true;updatePlaybackControls();');
+  assert.equal(h.nodes['#play'].disabled,true);
+});
+
+test('end-to-end metric includes readiness delay and ignores leading silent PCM',()=>{
+  const h=harness();
+  h.run('audioCtx={currentTime:4,baseLatency:.01,outputLatency:.02};');
+  assert.ok(h.run('firstAudioLatency({requestedAt:performance.now()-8000},4.08)')>=8110);
+  h.context.silentBuffer={sampleRate:1000,getChannelData:()=>new Float32Array(200)};
+  h.context.speechBuffer={sampleRate:1000,getChannelData:()=>Float32Array.from({length:200},(_,i)=>i<100?0:.1)};
+  assert.equal(h.run('firstSpeechOffset(silentBuffer)'),null);
+  assert.equal(h.run('firstSpeechOffset(speechBuffer)'),.1);
+});
+
+test('missing live readiness cannot pass a status refresh or leave playback enabled', async()=>{
+  const h=harness();
+  h.run('selectedVoiceWantsGpt=()=>true;currentAnswer="回答";ttsStatus={provider:"gpt-sovits",ready:true,live_path_warmed:true};ttsCheckedAt=-10000;updatePlaybackControls();');
+  assert.equal(h.nodes['#play'].disabled,false);
+  h.fetch(async()=>response({provider:'gpt-sovits',ready:true}));
+  assert.equal(await h.run('waitForGptReady()'),false);
+  assert.equal(h.nodes['#play'].disabled,true);
+  assert.equal(h.nodes['#speakAnswer'].disabled,true);
+  assert.equal(h.run('ttsLatencyTimer'),null);
+});
+
+test('stream failure clears running timer',async()=>{
+  const h=harness();
+  h.run('startLatencyTimer();liveRun=createLiveRun("gpt-sovits",["测试"]);');
+  h.fetch(async()=>{throw new Error('disconnected');});
+  await h.run('streamGptUnit(liveRun)');
+  assert.equal(h.run('ttsLatencyTimer'),null);
+  assert.equal(h.nodes['#ttsLatency'].textContent,'');
+});
+
+test('an all-silent GPT response fails without retaining a timer or reporting completion',()=>{
+  const h=harness();
+  h.run('startLatencyTimer();liveRun=createLiveRun("gpt-sovits",["测试"]);liveRun.nextIndex=1;finishRunIfDrained(liveRun);');
+  assert.equal(h.run('liveRun'),null);
+  assert.equal(h.run('ttsLatencyTimer'),null);
+  assert.equal(h.nodes['#ttsLatency'].textContent,'');
+  assert.match(h.nodes['#playstate'].textContent,/未检测到有效人声/);
+});
+
+function pcmHeader(declaredBytes) {
+  const bytes = Buffer.alloc(44);
+  bytes.write('RIFF'); bytes.writeUInt32LE(0x7fffffff, 4); bytes.write('WAVEfmt ', 8);
+  bytes.writeUInt32LE(16, 16); bytes.writeUInt16LE(1, 20); bytes.writeUInt16LE(1, 22);
+  bytes.writeUInt32LE(32000, 24); bytes.writeUInt32LE(64000, 28);
+  bytes.writeUInt16LE(2, 32); bytes.writeUInt16LE(16, 34);
+  bytes.write('data', 36); bytes.writeUInt32LE(declaredBytes, 40);
+  return bytes;
+}
+
+test('WAV stream releases PCM before the declared data length has arrived', () => {
+  for (const declaredBytes of [0, 64000, 0x7fffffff - 36, 0xffffffff]) {
+    const h = harness();
+    const header = pcmHeader(declaredBytes);
+    const pcm = Buffer.from([0x00, 0x10, 0x00, 0xf0]);
+    h.context.chunks = [header.subarray(0, 21), header.subarray(21, 43),
+      Buffer.concat([header.subarray(43), pcm.subarray(0, 2)]), pcm.subarray(2)];
+    h.context.received = [];
+    h.run('schedulePcm = (run, bytes) => { received.push(...bytes); return () => {}; }; liveRun = createLiveRun("gpt-sovits", ["测试"]);');
+    assert.equal(h.run('consumeStreamBytes(liveRun, chunks[0], 0)'), null);
+    assert.equal(h.run('consumeStreamBytes(liveRun, chunks[1], 0)'), null);
+    assert.equal(typeof h.run('consumeStreamBytes(liveRun, chunks[2], 0)'), 'function');
+    h.run('consumeStreamBytes(liveRun, chunks[3], 0)');
+    assert.deepEqual(h.context.received, [...pcm]);
+    assert.equal(h.run('liveRun.format.sampleRate'), 32000);
+  }
+});
+
+test('WAV parser waits for complete metadata including odd chunk padding', () => {
+  const h = harness();
+  const header = pcmHeader(0x7fffffff - 36);
+  const metadata = Buffer.from([0x4a, 0x55, 0x4e, 0x4b, 3, 0, 0, 0, 1, 2, 3, 0]);
+  h.context.wav = Buffer.concat([header.subarray(0, 12), metadata, header.subarray(12)]);
+  for (let end = 0; end < 56; end++) {
+    h.context.end = end;
+    assert.equal(h.run('parseWavHeader(wav.subarray(0, end))'), null);
+  }
+  assert.equal(h.run('parseWavHeader(wav).dataOffset'), 56);
 });

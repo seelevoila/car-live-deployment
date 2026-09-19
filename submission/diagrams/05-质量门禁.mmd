@@ -1,0 +1,15 @@
+%%{init: {'flowchart': {'nodeSpacing': 18, 'rankSpacing': 22, 'padding': 8}}}%%
+flowchart LR
+    Start([上传音频]) --> A[格式检查<br/>时长5-10s<br/>采样率≥16k]
+    A -->|不合格| Failed([拒绝])
+    A -->|合格| B[标准化<br/>质量分析]
+    B --> C{人声>80%<br/>静音<20%<br/>削波<1%}
+    C -->|否| Failed
+    C -->|是| D{文本匹配<br/>>90%}
+    D -->|否| Failed
+    D -->|是| E[声纹检查<br/>创建Profile]
+    E --> End([可用])
+
+    style Start fill:#4CAF50
+    style End fill:#4CAF50
+    style Failed fill:#F44336

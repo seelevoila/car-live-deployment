@@ -1,8 +1,10 @@
 """Knowledge management, analytics and real human voice evaluations."""
 from datetime import datetime,timezone,timedelta
 import json
+import logging
 from uuid import uuid4
-from fastapi import APIRouter,HTTPException
+from typing import Literal
+from fastapi import APIRouter,HTTPException,Body
 from fastapi.responses import Response
 from pydantic import BaseModel,Field
 from .db import conn,now
@@ -92,6 +94,8 @@ class PlaybackEvent(BaseModel):
 @router.post('/analytics/events')
 def event(req:PlaybackEvent):
     log_event(req.kind,vehicle=req.vehicle,seconds=req.seconds,latency_ms=req.latency_ms,event_id=req.id)
+    if req.kind == 'first_audio':
+        logging.getLogger('uvicorn.error').info('first_audio event: %s', json.dumps(req.model_dump(), ensure_ascii=False))
     return {'saved':True}
 
 
@@ -114,6 +118,27 @@ def analytics(days:int=7):
             'question_count':len(questions),'revision_count':sum(e['kind']=='revision' for e in events),
             'popular_vehicles':rank(vehicles),'retrieval_hotspots':rank(hotspots),'frequent_questions':rank(questions_count),
             'first_audio':{'count':len(first),'average_ms':round(sum(first)/len(first),1) if first else None,'max_ms':max(first) if first else None}}
+
+
+class AnalyticsClear(BaseModel):
+    # Omitted filters mean all historical analytics events, including questions.
+    days: int | None = Field(default=None, ge=1, le=36500)
+    scopes: list[Literal['playback', 'first_audio', 'revision', 'question']] | None = Field(default=None, min_length=1)
+
+
+@router.post('/analytics/clear')
+def clear_analytics(req: AnalyticsClear = Body(default_factory=AnalyticsClear)):
+    clauses, values = [], []
+    if req.days is not None:
+        clauses.append('created_at>=?')
+        values.append((datetime.now(timezone.utc)-timedelta(days=req.days)).isoformat())
+    if req.scopes is not None:
+        clauses.append('kind IN (' + ','.join('?' for _ in req.scopes) + ')')
+        values.extend(req.scopes)
+    where = ' WHERE ' + ' AND '.join(clauses) if clauses else ''
+    with conn() as c:
+        deleted = c.execute('DELETE FROM analytics_events' + where, values).rowcount
+    return {'deleted': deleted, 'days': req.days, 'scopes': req.scopes, 'all_history': req.days is None}
 
 
 @router.get('/llm/status')

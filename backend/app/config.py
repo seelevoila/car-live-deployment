@@ -1,7 +1,18 @@
 from pathlib import Path
+from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from .runtime_paths import (
+    detect_gpt_sovits_root,
+    detect_gpt_sovits_python,
+    detect_live2d_model_root,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
+
+# Detect external dependencies at import time
+_GPT_SOVITS_ROOT = detect_gpt_sovits_root()
+_GPT_SOVITS_PYTHON = detect_gpt_sovits_python()
+_LIVE2D_ROOT = detect_live2d_model_root()
 
 class Settings(BaseSettings):
     database_path: Path = ROOT / "data" / "car_live.db"
@@ -19,11 +30,8 @@ class Settings(BaseSettings):
     # Optional separate ONNX encoder export with the same CLS pooling contract.
     # Changing model files requires rebuilding the index; manifest hashes identify it.
     rag_embedding_query_prefix: str = '为这个句子生成表示以用于检索相关文章：'
-    # Select the server-side speech engine. IndexTTS-2.5 is the documented
-    # default (see README and backend/.env.example); GPT-SoVITS stays selectable
-    # with TTS_PROVIDER=gpt-sovits. `main._tts_provider()` also falls back to
-    # IndexTTS2 for an empty value, so both defaults agree.
-    tts_provider: str = "idextts2"
+    # The server-side speech engine is GPT-SoVITS v2ProPlus.
+    tts_provider: str = "gpt-sovits"
     gpt_sovits_url: str = ""
     gpt_sovits_ref_audio: str = ""
     gpt_sovits_prompt_text: str = ""
@@ -35,16 +43,32 @@ class Settings(BaseSettings):
     # that environment or its speaker encoder is unavailable.
     gpt_sovits_calibration_enabled: bool = True
     gpt_sovits_calibration_idle_seconds: float = 15.0
-    gpt_sovits_python: str = str(ROOT.parent / "GPT-SoVITS" / ".venv" / "Scripts" / "python.exe")
-    gpt_sovits_speaker_model: str = str(ROOT.parent / "GPT-SoVITS" / "GPT_SoVITS" / "pretrained_models" / "sv" / "pretrained_eres2netv2w24s4ep4.ckpt")
+    # Per-new-voice acoustic adaptation. This is a soft resident training
+    # budget; upload, queueing and checked synthesis acceptance are additional.
+    gpt_sovits_adaptation_enabled: bool = True
+    gpt_sovits_adaptation_seconds: float = 30.0
+    gpt_sovits_adaptation_max_steps: int = 24
+    gpt_sovits_python: str = str(_GPT_SOVITS_PYTHON) if _GPT_SOVITS_PYTHON else ""
+    gpt_sovits_speaker_model: str = (
+        str(_GPT_SOVITS_ROOT / "GPT_SoVITS" / "pretrained_models" / "sv" / "pretrained_eres2netv2w24s4ep4.ckpt")
+        if _GPT_SOVITS_ROOT else ""
+    )
     gpt_sovits_aux_similarity_threshold: float = 0.85
-    # The API process holds one GPT-SoVITS model at a time.  Keep the base
-    # v2ProPlus pair available for newly cloned voices and the optional Xilian
-    # fine-tune pair for the trained Xilian voice only.
-    gpt_sovits_base_gpt_weights: str = str(ROOT.parent / "GPT-SoVITS" / "GPT_SoVITS" / "pretrained_models" / "s1v3.ckpt")
-    gpt_sovits_base_sovits_weights: str = str(ROOT.parent / "GPT-SoVITS" / "GPT_SoVITS" / "pretrained_models" / "v2Pro" / "s2Gv2ProPlus.pth")
-    gpt_sovits_xilian_gpt_weights: str = str(ROOT / "artifacts" / "xilian-dataset" / "weights" / "xilian_v2pro-e10.ckpt")
-    gpt_sovits_xilian_sovits_weights: str = str(ROOT / "artifacts" / "xilian-dataset" / "weights" / "xilian_v2pro_e6_s588.pth")
+    # The API process holds one GPT-SoVITS model at a time. Keep the official
+    # v2ProPlus pair available for new clones and installed custom profiles
+    # separate from it.
+    gpt_sovits_base_gpt_weights: str = (
+        str(_GPT_SOVITS_ROOT / "GPT_SoVITS" / "pretrained_models" / "s1v3.ckpt")
+        if _GPT_SOVITS_ROOT else ""
+    )
+    gpt_sovits_base_sovits_weights: str = (
+        str(_GPT_SOVITS_ROOT / "GPT_SoVITS" / "pretrained_models" / "v2Pro" / "s2Gv2ProPlus.pth")
+        if _GPT_SOVITS_ROOT else ""
+    )
+    # Only explicitly installed, per-voice adaptations are registered here.
+    gpt_sovits_profiles_file: Path = ROOT / 'data' / 'voice_models' / 'profiles.json'
+    # Preserve reference delivery, with complete-phrase checks and retry/fallback.
+    gpt_sovits_clone_prompt_policy: Literal['off', 'checked'] = 'checked'
     # Mode 1 returns stable phrase-sized PCM fragments with the quality-first
     # decoder. The browser queues them without adding synthetic pauses.
     gpt_sovits_streaming_mode: int = 1
@@ -61,10 +85,8 @@ class Settings(BaseSettings):
     gpt_sovits_live_text_split_method: str = "cut5"
     gpt_sovits_live_min_chunk_length: int = 16
     gpt_sovits_live_max_chars: int = 64
-    # Live clones use a bounded expressive floor. Earlier values (12/.58/.52)
-    # removed pitch motion and made every speaker sound flat. The floor keeps
-    # calibrated conservative profiles from collapsing while still bounding
-    # runaway sampling.
+    # Uncalibrated fallback only. The local 2026-09-18 A/B found long silent
+    # output after blindly lowering Xiadie's sampling; validated profiles win.
     gpt_sovits_clone_live_top_k: int = 18
     gpt_sovits_clone_live_top_p: float = 0.72
     gpt_sovits_clone_live_temperature: float = 0.66
@@ -72,26 +94,13 @@ class Settings(BaseSettings):
     # Live clones default to this path because ASR found reference-tail words
     # inserted in prompted streams. Other model families retain their prompt.
     gpt_sovits_live_use_prompt_text: bool = False
-    gpt_sovits_live_delivery: str = "warm"
-    # IndexTTS-2.5 is the default engine and is deliberately configured
-    # independently from GPT-SoVITS.  Either point at a running HTTP wrapper or
-    # an official local IndexTTS2 checkout containing its checkpoints directory.
-    # INDEX_TTS2_CONFIG and INDEX_TTS2_MODEL_DIR must name the *2.5* checkpoint
-    # set: the adapter picks indextts.infer_v2_5 from the `version:` field of
-    # config.yaml, and a 2.0 checkpoint set silently keeps the older engine.
-    index_tts2_enabled: bool = True
-    index_tts2_url: str = ""
-    index_tts2_root: str = str(ROOT.parent / "IndexTTS2")
-    index_tts2_python: str = str(ROOT.parent / "IndexTTS2" / ".venv" / "Scripts" / "python.exe")
-    index_tts2_config: str = str(ROOT.parent / "IndexTTS2" / "checkpoints" / "config.yaml")
-    index_tts2_model_dir: str = str(ROOT.parent / "IndexTTS2" / "checkpoints")
-    index_tts2_use_fp16: bool = True
-    index_tts2_ref_audio: str = ""
-    index_tts2_prompt_text: str = ""
+    gpt_sovits_live_seed_mode: Literal['fixed', 'text-low8'] = 'fixed'
+    # Preserve the reference's delivery and the calibrated temperature.
+    gpt_sovits_live_delivery: str = "natural"
     # Optional Live2D avatar assets. The default points to the supplied
     # Hu Tao model outside the repository; assets are served read-only by the
     # backend and are never copied into the source tree.
-    live2d_model_root: str = str(ROOT.parent / "原神")
+    live2d_model_root: str = str(_LIVE2D_ROOT) if _LIVE2D_ROOT else ""
     live2d_model_file: str = "Hu Tao.model3.json"
     live2d_enabled: bool = True
     max_document_bytes: int = 25 * 1024 * 1024

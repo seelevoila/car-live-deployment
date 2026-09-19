@@ -1,0 +1,16 @@
+%%{init: {'flowchart': {'nodeSpacing': 22, 'rankSpacing': 28, 'padding': 10}}}%%
+flowchart TB
+    A1[PDF] --> B[解析 / 清洗 / 分块]
+    A2[DOCX] --> B
+    A3[TXT] --> B
+    B --> C1[(SQLite + BM25)]
+    B --> C2[(FAISS 向量)]
+    C1 --> F[RRF融合 + 重排]
+    C2 --> F
+    F --> G[生成答案]
+    G --> T[TTS音频]
+
+    style A1 fill:#E1F5FE
+    style A2 fill:#E1F5FE
+    style A3 fill:#E1F5FE
+    style T fill:#F8BBD0

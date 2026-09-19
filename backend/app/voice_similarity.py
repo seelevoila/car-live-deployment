@@ -67,6 +67,16 @@ def _embedding(path: Path, model, kaldi):
     return vector / (vector.norm() + 1e-8)
 
 
+def reference_weights(reference_scores, threshold):
+    """Weights in primary/accepted-auxiliary order, shared with inference."""
+    accepted = [item['score'] for item in reference_scores if item.get('accepted')]
+    if not accepted:
+        return [1.0]
+    strongest = max(accepted, default=threshold)
+    primary = .50 if strongest >= .92 else (.58 if strongest >= .88 else .68)
+    return [primary] + [(1.0-primary)/len(accepted)] * len(accepted)
+
+
 def _reference_target(paths: list[Path], model, kaldi, threshold: float):
     """Keep only auxiliary clips that agree with the transcript-bearing clip."""
     vectors = [_embedding(path, model, kaldi) for path in paths]
@@ -89,26 +99,15 @@ def _reference_target(paths: list[Path], model, kaldi, threshold: float):
     # clip's delivery rather than the speaker across recordings.  Increase
     # auxiliary weight only when its embedding agrees closely, and keep a
     # conservative primary weight for borderline matches.
-    if len(accepted_vectors) == 1:
-        target = accepted_vectors[0]
-    else:
-        accepted_scores = [item["score"] for item in reference_scores if item.get("accepted")]
-        strongest_agreement = max(accepted_scores, default=threshold)
-        if strongest_agreement >= 0.92:
-            primary_weight = 0.50
-        elif strongest_agreement >= 0.88:
-            primary_weight = 0.58
-        else:
-            primary_weight = 0.68
-        auxiliary_weight = (1.0 - primary_weight) / (len(accepted_vectors) - 1)
-        target = accepted_vectors[0] * primary_weight
-        for vector in accepted_vectors[1:]:
-            target = target + vector * auxiliary_weight
+    weights = reference_weights(reference_scores, threshold)
+    target = accepted_vectors[0] * weights[0]
+    for vector, weight in zip(accepted_vectors[1:], weights[1:]):
+        target = target + vector * weight
     target = target / (target.norm() + 1e-8)
     return target, accepted_paths, reference_scores
 
 
-def _prosody_features(path: Path):
+def _prosody_features(path: Path, *, include_curve=False):
     """Measure pitch motion without assuming a particular gender or role."""
     audio, sample_rate = sf.read(path, dtype="float32", always_2d=True)
     waveform = torch.from_numpy(audio.mean(axis=1)).unsqueeze(0)
@@ -185,6 +184,26 @@ def _prosody_features(path: Path):
         & np.isfinite(smoothed)
     ]
     ending_shift = float(np.median(ending) - np.median(before)) if ending.size >= 3 and before.size >= 4 else 0.0
+    # Use the final voiced frame as the ending anchor, preserving the existing
+    # similarity/penalty fields for historical score comparability.
+    finite = np.flatnonzero(np.isfinite(smoothed))
+    end_at = times[finite[-1]]
+    tail = (times >= end_at - .45) & np.isfinite(smoothed)
+    ending_slope = float(np.polyfit(times[tail], smoothed[tail], 1)[0]) if tail.sum() >= 3 else None
+    # Count reversals over 100ms intervals with a 0.5-semitone deadband.
+    # Chinese lexical tones also turn: this is a measurement, not a defect score.
+    turns, previous_sign, previous_time = 0, 0, -1.0
+    for index in range(5, smoothed.size, 5):
+        segment = smoothed[index-5:index+1]
+        if not np.isfinite(segment).all():
+            previous_sign = 0
+            continue
+        delta = smoothed[index] - smoothed[index-5]
+        sign = 1 if delta > .5 else -1 if delta < -.5 else 0
+        if sign:
+            if previous_sign and sign != previous_sign and times[index] - previous_time <= .3:
+                turns += 1
+            previous_sign, previous_time = sign, times[index]
     # Speaker cosine similarity does not expose a noisy tail or clipped
     # consonant. These small waveform diagnostics let calibration reject a
     # buzzy candidate even when its timbre embedding is close to the target.
@@ -198,7 +217,7 @@ def _prosody_features(path: Path):
     speech_level = float(np.percentile(active_rms, 75)) if active_rms.size else 0.0
     noise_level = float(np.percentile(quiet_rms, 50)) if quiet_rms.size else 0.0
     snr_db = 20.0 * math.log10((speech_level + 1e-6) / (noise_level + 1e-6)) if speech_level else 0.0
-    return {
+    features = {
         "available": True,
         "duration": round(duration, 3),
         "voiced_ratio": round(float(voiced.mean()), 4),
@@ -209,7 +228,14 @@ def _prosody_features(path: Path):
         "snr_db": round(snr_db, 2),
         "clipped_ratio": round(clipped_ratio, 5),
         "dc_offset": round(dc_offset, 5),
+        "pitch_turn_count": turns,
+        "ending_slope_st_per_s": round(ending_slope, 3) if ending_slope is not None else None,
     }
+    if include_curve:
+        features['f0_curve'] = [{'time_s': round(float(t), 3),
+                                'hz': round(float(2 ** (pitch/12)), 2) if np.isfinite(pitch) else None}
+                               for t, pitch in zip(times, smoothed)]
+    return features
 
 
 def _reference_prosody_risk(features: dict):

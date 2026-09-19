@@ -28,9 +28,9 @@
     revision:()=>sendEvent('revision'),
     audioScheduled(run,source,when){
       scheduledIntervals.push({run,source,start:when,end:source.liveEnd});
-      if(run.measuredFirstAudio)return;
+      if(run.measuredFirstAudio || run.firstAudioLatencyMs == null)return;
       run.measuredFirstAudio=true;
-      sendEvent('first_audio',{latency_ms:Math.max(0,performance.now()-run.requestedAt+(when-audioCtx.currentTime+(audioCtx.baseLatency||0)+(audioCtx.outputLatency||0))*1000)});
+      if (run.mode !== 'preview' && !run.warmup) sendEvent('first_audio',{latency_ms:run.firstAudioLatencyMs});
     }
   };
   const selectedIds=()=>[...document.querySelectorAll('.document-select:checked')].map(n=>Number(n.value));
@@ -146,7 +146,19 @@
     const loadingId=beginViewLoad('analytics');if(!loadingId)return;
     const data=await api('/analytics');
     if(activeViewLoading!==loadingId)return;
-    layout('直播统计','最近 7 天的实际讲解时长、观众咨询与知识库检索热点。',`<div class="metrics"><div class="metric"><b>${(data.playback_seconds/60).toFixed(1)} 分钟</b><span>实际讲解时长</span></div><div class="metric"><b>${data.question_count}</b><span>观众咨询</span></div><div class="metric"><b>${data.revision_count}</b><span>动态改稿</span></div><div class="metric"><b>${data.first_audio.max_ms==null?'暂无':(data.first_audio.max_ms/1000).toFixed(2)+' 秒'}</b><span>首音频最大延迟</span></div></div>${rank('高频咨询车型',data.popular_vehicles)}${rank('知识库检索热点',data.retrieval_hotspots)}${rank('高频问题',data.frequent_questions)}<p><a class="btn secondary" href="${API}/reports/export" download>导出运行与听测报告</a></p>`,{eyebrow:'扩展能力',tag:'近 7 天'});
+    layout('直播统计','最近 7 天的实际讲解时长、观众咨询与知识库检索热点。',`<div class="metrics"><div class="metric"><b>${(data.playback_seconds/60).toFixed(1)} 分钟</b><span>实际讲解时长</span></div><div class="metric"><b>${data.question_count}</b><span>观众咨询</span></div><div class="metric"><b>${data.revision_count}</b><span>动态改稿</span></div><div class="metric"><b>${data.first_audio.max_ms==null?'暂无':(data.first_audio.max_ms/1000).toFixed(2)+' 秒'}</b><span>音频最大延时</span><small>点击播报 → 首个音频片段可听的端到端最大耗时（按音频排程和设备输出延迟估算）。样本 ${data.first_audio.count} 次；包含点击后的 TTS 预热等待，不含后台预热与试听。</small></div></div>${rank('高频咨询车型',data.popular_vehicles)}${rank('知识库检索热点',data.retrieval_hotspots)}${rank('高频问题',data.frequent_questions)}<p><a class="btn secondary" href="${API}/reports/export" download>导出运行与听测报告</a> <button class="btn secondary" id="clearAnalytics">清除统计数据</button></p>`,{eyebrow:'扩展能力',tag:'近 7 天'});
+    document.querySelector('#clearAnalytics').onclick=()=>{
+      const dialog=showModal('<h2>清除统计数据</h2><p>将清除全部历史的播报时长、首音频延时、改稿和咨询统计。音色、知识库和人工听测报告会保留。此操作无法撤销。</p><div class="controls"><button class="btn secondary" data-close>取消</button><button class="btn" id="confirmClearAnalytics">确认清除全部统计</button></div><p role="status" id="clearAnalyticsResult"></p>');
+      const button=dialog.querySelector('#confirmClearAnalytics');
+      button.onclick=async()=>{
+        button.disabled=true;
+        try{
+          await api('/analytics/clear',json('POST',{}));
+          dialog.close();dialog.remove();
+          if(activeViewLoading===loadingId)await analyticsView();
+        }catch(error){dialog.querySelector('#clearAnalyticsResult').textContent=error.message;button.disabled=false;}
+      };
+    };
   }
   async function modelView(){
     const loadingId=beginViewLoad('model');if(!loadingId)return;

@@ -1,0 +1,19 @@
+%%{init: {'flowchart': {'nodeSpacing': 20, 'rankSpacing': 26, 'padding': 10}}}%%
+flowchart TB
+    Start([用户提问]) --> A[预处理<br/>BGE 512维]
+    A --> C1[FAISS语义 Top24]
+    A --> C2[BM25词法 Top24]
+    C1 --> E[RRF融合 k=60]
+    C2 --> E
+    E --> F[父块去重] --> G[BGE Reranker] --> I[动力范围检查<br/>Top 5]
+    I --> J{配置LLM?}
+    J -->|是| K[大模型生成]
+    J -->|否| L[本地摘录]
+    K --> M[冲突检查]
+    L --> M
+    M --> End([返回答案])
+
+    style Start fill:#4CAF50
+    style End fill:#4CAF50
+    style A fill:#2196F3
+    style G fill:#2196F3

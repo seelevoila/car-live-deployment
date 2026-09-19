@@ -8,12 +8,9 @@ test/
 backend/.env
 data/car_live.db
 data/uploads/
-# RAG model files are committed below. The large reranker ONNX is stored as
-# repository parts and joined by scripts/setup_rag_models.py after clone.
-models/rag/reranker/model_quantized.onnx
+data/voice_models/
 data/*.rag-index/
-artifacts/astra-v1-base/
-artifacts/AstraTTS-source/
+artifacts/
 _docx_review/
 .pytest_cache/
 **/__pycache__/
@@ -21,8 +18,12 @@ _docx_review/
 
 # Runtime logs and generated audio/diagnostic captures
 *.log
+logs/
 *.wav
 !data/preset_voices/*.wav
+*.mp3
+*.m4a
+*.ogg
 *.bin
 *.TAG
 backend/*.json
@@ -34,6 +35,26 @@ backendtts
 /tts_diag_payload.json
 /tts_payload.json
 /verify_payload.json
+
+# Root temporary files
+diagnose.html
+test-health.html
+*.docx
+!docs/**/*.docx
+
+# Cleanup archive
+.trash/
+
+# Frontend/build dependencies
+node_modules/
+**/node_modules/
+
+# Private competition/submission material
+submission/
+
+# External model/runtime weights and local checkpoints
+*.ckpt
+*.pth
 
 # Temporary editor/system files
 .DS_Store
