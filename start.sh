@@ -25,6 +25,12 @@ if [[ -z "$PYTHON" ]]; then
   exit 1
 fi
 
+echo "Preparing bundled RAG models ..." >&2
+if ! "$PYTHON" "$ROOT/scripts/setup_rag_models.py"; then
+  echo "Error: RAG model setup failed; inspect the setup output and retry." >&2
+  exit 1
+fi
+
 port_pids() {
   local port="$1"
   if command -v lsof >/dev/null 2>&1; then

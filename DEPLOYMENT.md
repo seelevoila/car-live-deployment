@@ -21,20 +21,17 @@
 - Windows 10/11、Linux 或 macOS
 - NVIDIA GPU 和 CUDA（用于可接受的 GPT-SoVITS 延迟）
 - 内存至少 8 GB，磁盘至少 5 GB（不含外部 GPT-SoVITS 整合包）
-- Git LFS
 - ffmpeg
 
 没有 NVIDIA GPU 时可以把 GPT-SoVITS 配置为 CPU，但推理和短时适配会明显变慢。文档中的首音频时间不适用于 CPU。
 
 ## 3. 克隆与 RAG 模型
 
-克隆前安装 Git LFS，否则 279 MB 的 reranker ONNX 只会得到一个指针文件：
+reranker ONNX 已拆成多个小于 100 MB 的普通 Git 分片，克隆后由项目脚本装配成完整文件：
 
 ~~~bash
-git lfs install
 git clone https://github.com/seelevoila/car-live-deployment.git
 cd car-live-deployment
-git lfs pull
 ~~~
 
 验证 RAG 文件：
@@ -49,7 +46,7 @@ python scripts/setup_rag_models.py
 All bundled RAG models passed local manifest checks; no download needed.
 ~~~
 
-如果 LFS 文件未下载或 manifest 校验失败，脚本会从 Hugging Face 固定 revision 下载。国内网络：
+如果仓库分片缺失或 manifest 校验失败，脚本会从 Hugging Face 固定 revision 下载。国内网络：
 
 ~~~bash
 python scripts/setup_rag_models.py --endpoint https://hf-mirror.com
@@ -145,7 +142,7 @@ GPT_SOVITS_ADAPTATION_ENABLED=true
 
 ~~~bash
 uv sync
-uv run python scripts/setup_rag_models.py
+uv run python start.py
 ~~~
 
 ### venv + pip
@@ -246,13 +243,13 @@ python scripts/setup_rag_models.py
 
 ### RAG 校验失败
 
-先运行 git lfs pull，再运行 setup_rag_models.py。仍失败时使用 hf-mirror endpoint；不要手动改 manifest 的 SHA256。
+先运行 setup_rag_models.py；它会装配仓库分片并校验 manifest 的 SHA256。仍失败时使用 hf-mirror endpoint；不要手动改 manifest 的 SHA256。三个启动入口也会在启动后端前执行这一步。
 
 ## 11. 已知限制和分发边界
 
 已经实现并在本地 Windows 环境验证：GPT-SoVITS 默认配置、流式接口、通用新建音色适配、profile 隔离、训练失败回退、旧权重回退、RAG 本地校验和三套内置音色。
 
-随仓库分发：RAG 模型（Git LFS）、RAG manifest、源码、测试、三套内置参考音频。
+随仓库分发：RAG 模型（普通 Git 分片，启动时装配）、RAG manifest、源码、测试、三套内置参考音频。
 
 需要用户自备：GPT-SoVITS v2ProPlus 整合包及权重、ffmpeg、可选 Live2D 模型、可选 LLM API Key、用户自己的克隆录音。
 

@@ -19,7 +19,7 @@ RAG 模型和三套内置参考音频随仓库分发。GPT-SoVITS 整合包、�
 ## 依赖
 
 - Python >=3.12,<3.13。
-- Git LFS：仓库中的 RAG ONNX 文件使用 LFS；克隆前执行 git lfs install。
+- RAG 模型：仓库以普通 Git 分片保存 reranker ONNX，启动脚本会自动装配并校验。
 - GPT-SoVITS v2ProPlus 官方整合包：从 [RVC-Boss/GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS) 的 Releases 获取，放到项目同级目录，推荐目录名 GPT-SoVITS-v2pro-20250604。也可以用 GPT_SOVITS_ROOT 指向其他目录。
 - ffmpeg：Windows 可用 [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) 或 [BtbN builds](https://github.com/BtbN/FFmpeg-Builds/releases)，Linux/macOS 用系统包管理器。程序先查 FFMPEG_BIN、PATH，再查 GPT-SoVITS runtime。
 - Live2D Cubism 模型（可选）：通过 LIVE2D_MODEL_ROOT 指定；缺失时数字主播页显示缺失提示，直播台和语音功能仍可用。
@@ -39,14 +39,12 @@ runtime/python                    # Linux/macOS 整合包
 ## 获取与初始化
 
 ~~~bash
-git lfs install
 git clone https://github.com/seelevoila/car-live-deployment.git
 cd car-live-deployment
-git lfs pull
 python scripts/setup_rag_models.py
 ~~~
 
-正常情况下，脚本会输出 All bundled RAG models passed local manifest checks; no download needed. 如果 LFS 文件缺失或校验失败，脚本会从固定 revision 的 Hugging Face 模型下载；国内网络可使用 --endpoint https://hf-mirror.com。模型来源和 revision 记录在 models/rag/*/manifest.json：
+RAG 文件随仓库分发：reranker 的 279 MB ONNX 被拆成多个小于 100 MB 的仓库分片，脚本会先装配，再按 manifest 校验 SHA256。正常情况下会输出 All bundled RAG models passed local manifest checks; no download needed。仅当分片缺失或校验失败时，脚本才会从固定 revision 的 Hugging Face 模型下载；国内网络可使用 --endpoint https://hf-mirror.com。启动脚本也会在启动后端前自动执行同一检查。模型来源和 revision 记录在 models/rag/*/manifest.json：
 
 - Xenova/bge-small-zh-v1.5，revision 75c43b069aac4d136ba6bc1122f995fedcfd2781
 - Xenova/bge-reranker-base，revision 280bcc27a84e0b898c251e06fddb25171bd9b101
@@ -94,7 +92,6 @@ start.sh 使用 lsof、ss 或 fuser 检查端口，并在确认进程属于本�
 
 ~~~bash
 uv sync
-uv run python scripts/setup_rag_models.py
 uv run python start.py
 ~~~
 

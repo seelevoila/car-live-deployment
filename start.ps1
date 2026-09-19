@@ -81,6 +81,10 @@ $python=@(
   (Join-Path $root '.venv\Scripts\python.exe'),
   (Join-Path $root 'backend\.venv\Scripts\python.exe')
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+if(-not(Test-Path $python)){throw '请先执行 python -m venv .venv，并安装 backend\requirements.txt'}
+$ragSetup = Join-Path $root 'scripts\setup_rag_models.py'
+& $python $ragSetup
+if($LASTEXITCODE -ne 0){throw 'RAG 模型准备失败，请手动运行 scripts/setup_rag_models.py 并检查输出'}
 # Auto-detect GPT-SoVITS root from environment or standard locations
 $gptRoot = $env:GPT_SOVITS_ROOT
 if (-not $gptRoot) {
@@ -156,7 +160,6 @@ if($gptAvailable){
   Start-Process -FilePath $gptPython -ArgumentList $gptArguments -WorkingDirectory $gptRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $root 'gpt-runtime.log') -RedirectStandardError (Join-Path $root 'gpt-runtime-error.log')
   }
 }
-if(-not(Test-Path $python)){throw '请先执行 python -m venv .venv，并安装 backend\requirements.txt'}
 if(-not (Assert-PortOwner 8000 $python '-m uvicorn app.main:app' '后端')){
   Start-Process -FilePath $python -ArgumentList '-m','uvicorn','app.main:app','--host','127.0.0.1','--port','8000' -WorkingDirectory (Join-Path $root 'backend') -WindowStyle Hidden -RedirectStandardOutput (Join-Path $root 'backend-runtime.log') -RedirectStandardError (Join-Path $root 'backend-runtime-error.log')
 }

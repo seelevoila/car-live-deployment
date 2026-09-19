@@ -40,6 +40,16 @@ def find_python() -> Path:
     raise SystemExit("Python 3.12 is required. Run: python -m venv .venv && install the dependencies.")
 
 
+def ensure_rag_models(python: Path) -> None:
+    """Materialize and verify the repository-bundled RAG models before startup."""
+    setup_script = ROOT / "scripts" / "setup_rag_models.py"
+    result = subprocess.run([str(python), str(setup_script)], cwd=ROOT, check=False)
+    if result.returncode:
+        raise RuntimeError(
+            "RAG model setup failed; run scripts/setup_rag_models.py manually and inspect its output"
+        )
+
+
 def find_gpt_sovits() -> tuple[Path | None, Path | None]:
     configured = os.environ.get("GPT_SOVITS_ROOT")
     candidates = [Path(configured)] if configured else []
@@ -161,6 +171,7 @@ def stop_process(process: subprocess.Popen | None) -> None:
 
 def main() -> int:
     python = find_python()
+    ensure_rag_models(python)
     for port, service in MANAGED_PORTS.items():
         if service == "gpt-sovits":
             continue
