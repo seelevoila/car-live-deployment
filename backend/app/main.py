@@ -443,6 +443,21 @@ def _gpt_sovits_reachable():
     return gpt_sovits_engine.probe(settings)
 
 
+def _gpt_sovits_runtime_status():
+    """Read the upstream process state for diagnostics and profile evidence."""
+    if not settings.gpt_sovits_url:
+        return {}
+    base = settings.gpt_sovits_url.rstrip('/')
+    try:
+        with httpx.Client(timeout=httpx.Timeout(1.5, connect=0.4), trust_env=False) as client:
+            response = client.get(base + '/runtime/status')
+            response.raise_for_status()
+            payload = response.json()
+            return payload if isinstance(payload, dict) else {}
+    except (httpx.HTTPError, ValueError, TypeError):
+        return {}
+
+
 def _mark_tts_success():
     global _TTS_LAST_SUCCESS_AT
     _TTS_LAST_SUCCESS_AT = time.monotonic()
@@ -644,6 +659,7 @@ def config():
 def tts_status():
     configured = _tts_has_reference()
     reachable = _gpt_sovits_reachable()
+    runtime = _gpt_sovits_runtime_status()
     # Profile priming is an opportunistic foreground warm-up. It may briefly
     # hold the inference lock, but it must not make the whole provider look
     # unavailable and force the browser into a long polling loop.
@@ -675,6 +691,11 @@ def tts_status():
         "live_path_warmup_ms": LIVE_PATH_WARMUP_MS,
         "live_path_warmup_error": LIVE_PATH_WARMUP_ERROR or None,
         "active_model_profile": _ACTIVE_MODEL_PROFILE or "unknown",
+        "runtime_instance_id": runtime.get("instance_id"),
+        "runtime_gpt_weights": runtime.get("gpt_weights"),
+        "runtime_sovits_weights": runtime.get("sovits_weights"),
+        "runtime_reference_cache_size": runtime.get("reference_cache_size"),
+        "runtime_reference_cache_hits": runtime.get("reference_cache_hits"),
         "model_profiles": list(model_profiles(settings)),
         "warming_up": warming_up,
         # Calibration is an optional background refinement. It must be
@@ -1854,14 +1875,16 @@ def _model_profile_weights(profile: str):
 
 
 def _ensure_model_profile_loaded(profile: str, client: httpx.Client):
-    """Load a model pair while TTS_LOCK is held.
+    """Load and verify a model pair while TTS_LOCK is held.
 
-    GPT-SoVITS keeps weights in global process state, so this is deliberately
-    adjacent to every inference request.  The lock makes a weight swap and
-    the following synthesis atomic with respect to streaming and preview.
+    The GPT-SoVITS process owns the actual global weights.  The backend's
+    cached profile is only a hint: the upstream process can survive a backend
+    restart, an external model switch, or a failed request.  Always let the
+    transport compare ``/runtime/status`` before inference so a stale cached
+    profile can never authorize synthesis with another speaker's weights.
     """
     global _ACTIVE_MODEL_PROFILE
-    if not settings.gpt_sovits_url or _ACTIVE_MODEL_PROFILE == profile:
+    if not settings.gpt_sovits_url:
         return
     try:
         gpt_sovits_engine.load_weights(settings, profile, client)
@@ -1872,9 +1895,13 @@ def _ensure_model_profile_loaded(profile: str, client: httpx.Client):
 
 
 async def _ensure_model_profile_loaded_async(profile: str, client: httpx.AsyncClient):
-    """Async counterpart used by the live streaming generator."""
+    """Async counterpart used by the live streaming generator.
+
+    Do not short-circuit from ``_ACTIVE_MODEL_PROFILE``; the service status is
+    the authority for the process-global model state.
+    """
     global _ACTIVE_MODEL_PROFILE
-    if not settings.gpt_sovits_url or _ACTIVE_MODEL_PROFILE == profile:
+    if not settings.gpt_sovits_url:
         return
     try:
         await gpt_sovits_engine.load_weights_async(settings, profile, client)

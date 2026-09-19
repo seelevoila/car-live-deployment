@@ -70,6 +70,19 @@ def test_sync_and_async_profile_switch_transport(tmp_path):
         model_profiles(cfg)
 
 
+def test_profile_cache_never_skips_runtime_weight_verification(monkeypatch):
+    calls = []
+    monkeypatch.setattr(settings, 'gpt_sovits_url', 'http://model')
+    monkeypatch.setattr(main, '_ACTIVE_MODEL_PROFILE', 'custom')
+
+    def verify(_settings, profile, _client):
+        calls.append(profile)
+
+    monkeypatch.setattr(main.gpt_sovits_engine, 'load_weights', verify)
+    main._ensure_model_profile_loaded('custom', object())
+    assert calls == ['custom']
+
+
 def test_fusion_is_explicit_per_profile_and_paths_resolve(tmp_path, monkeypatch):
     manifest = tmp_path/'profiles.json'
     monkeypatch.setattr(settings, 'gpt_sovits_profiles_file', manifest)

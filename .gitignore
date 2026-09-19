@@ -10,6 +10,7 @@ data/car_live.db
 data/uploads/
 data/voice_models/
 data/*.rag-index/
+models/rag/reranker/model_quantized.onnx
 artifacts/
 _docx_review/
 .pytest_cache/
